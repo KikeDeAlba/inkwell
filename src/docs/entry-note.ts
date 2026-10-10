@@ -11,7 +11,7 @@ import {
   upsertEntryNote,
   type EntryNoteRow,
 } from '../db/entry-notes.ts'
-import { bitaProjectRef, adoptBitaProject, findSpaceById, findSpaceByName, findSpaceForBitaProject, insertSpace, updateSpace } from '../db/spaces.ts'
+import { bitaProjectRef, adoptBitaProject, findSpaceById, findSpaceByName, insertSpace, linkedSpaceFor, updateSpace } from '../db/spaces.ts'
 import type { SpaceRow } from '../db/rows.ts'
 import { formatDuration } from '../domain/duration.ts'
 import { localDay } from '../domain/timezone.ts'
@@ -72,7 +72,7 @@ export function entryFromNote(row: EntryNoteRow): BitaEntry {
 
 export function peekSpaceForEntry(db: DatabaseSync, entry: Pick<BitaEntry, 'projectId' | 'projectName'>): SpaceRow | null {
   if (entry.projectId === null) return null
-  const linked = findSpaceForBitaProject(db, entry.projectId)
+  const linked = linkedSpaceFor(db, entry.projectId, entry.projectName, false)
   if (linked) return linked
   if (entry.projectName === null) return null
   const sameName = findSpaceByName(db, entry.projectName)
@@ -81,7 +81,7 @@ export function peekSpaceForEntry(db: DatabaseSync, entry: Pick<BitaEntry, 'proj
 
 export function spaceForEntry(db: DatabaseSync, entry: Pick<BitaEntry, 'projectId' | 'projectName'>, adopt = true): SpaceRow | null {
   if (entry.projectId === null) return null
-  const linked = findSpaceForBitaProject(db, entry.projectId)
+  const linked = linkedSpaceFor(db, entry.projectId, entry.projectName)
   if (linked) return linked
   const adopted = adopt ? adoptBitaProject(db, String(entry.projectId)) : undefined
   if (adopted && (adopted.externalRef === null || adopted.externalRef === bitaProjectRef(entry.projectId))) return adopted

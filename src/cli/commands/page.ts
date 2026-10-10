@@ -43,7 +43,7 @@ import { MAX_PAGE_DEPTH, pageRelPath } from '../../docs/layout.ts'
 import { outline, parseDocument, type DocHeading, type ParsedDocument } from '../../docs/markdown.ts'
 import { backlogHeadings } from '../../docs/backlog-extract.ts'
 import { listBacklogItems } from '../../db/backlog.ts'
-import { findSpaceForBitaProject } from '../../db/spaces.ts'
+import { linkedSpaceFor } from '../../db/spaces.ts'
 import { PAGE_SPLIT_BYTES, PAGE_SPLIT_SECTIONS } from '../../config/constants.ts'
 import { recordPageDoc, movePageFile, pageCommitIntent, pageFilePaths } from '../../docs/page-record.ts'
 import {
@@ -518,7 +518,7 @@ async function runNew(ctx: PageContext, args: ParsedArgs, positional: string[], 
     : projectRaw !== undefined
       ? spaceIdArg(ctx.db, projectRaw)
       : fromEntry?.projectId != null
-        ? (findSpaceForBitaProject(ctx.db, fromEntry.projectId)?.id ?? null)
+        ? (linkedSpaceFor(ctx.db, fromEntry.projectId, fromEntry.projectName)?.id ?? null)
         : null
 
   const depth = parent ? parent.depth + 1 : 0
