@@ -14,6 +14,7 @@ export const CAPABILITIES = [
   'docs.diagrams',
   'docs.export.pdf',
   'docs.confluence.sync',
+  'docs.entry-notes',
 ]
 
 export const SUBSCRIBED_EVENTS = ['delete', 'merge', 'cancel', 'start', 'stop', 'amend']
@@ -37,7 +38,7 @@ export function manifest(bin: readonly string[] = binCommand()): ToolManifest {
   return defineManifest({
     name: 'inkwell',
     version: VERSION,
-    description: 'Living technical documentation: pages, backlog, history, diagrams, PDF and Confluence sync',
+    description: 'Living technical documentation: pages, entry notes, backlog, history, diagrams, PDF and Confluence sync',
     bin: [...bin],
     capabilities: CAPABILITIES,
     subscribes: [{ tool: 'bita', events: SUBSCRIBED_EVENTS, command: [...bin, 'bita-hook'] }],
@@ -75,6 +76,12 @@ export function integration(options: { drawio?: boolean } = {}): agents.AgentInt
           'Bash(inkwell git status:*)',
           'Bash(inkwell confluence status:*)',
           'Bash(inkwell confluence conflict ls:*)',
+          'Bash(inkwell note path:*)',
+          'Bash(inkwell note show:*)',
+          'Bash(inkwell note get:*)',
+          'Bash(inkwell note ls:*)',
+          'Bash(inkwell note search:*)',
+          'Bash(inkwell note save:*)',
           'Bash(inkwell --version)',
         ],
       },

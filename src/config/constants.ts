@@ -11,3 +11,15 @@ export const DOCS_GIT_LOCK_TIMEOUT_MS = 5_000
 export const DOCS_GIT_LOCK_STALE_MS = 60_000
 
 export const MEETING_KINDS: readonly string[] = ['remote-meeting', 'in-person-meeting']
+
+export const ENTRY_NOTE_SECTIONS: readonly string[] = [
+  'Contexto',
+  'Qué se hizo',
+  'Decisiones',
+  'Hallazgos',
+  'Verificación',
+  'Pendiente',
+  'Tocado',
+]
+
+export const ENTRY_NOTE_SECTIONS_REQUIRED: readonly string[] = ['Contexto', 'Qué se hizo', 'Pendiente']

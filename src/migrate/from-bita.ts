@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { cp, mkdir, readdir, readFile, rm, rmdir } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -14,11 +14,13 @@ import { commitPaths, isDocsRepo, initDocsRepo, gitAvailable } from '../docs/git
 import { execGit } from '../docs/git-exec.ts'
 import { resolveDocPath } from '../docs/paths.ts'
 import { ConflictError, NotFoundError } from '../errors.ts'
+import { importNotesFromBita, type NotesImportReport } from './notes-from-bita.ts'
+import { columns, hasTable } from './bita-schema.ts'
 import { SITE_KEY } from '../cli/spaces.ts'
 
 export const MIGRATED_AT_KEY = 'migration.bita.at'
 export const MIGRATED_FROM_KEY = 'migration.bita.database'
-export const MIGRATION_COMMIT_SUBJECT = 'chore: move docs from bita and drop per-entry notes'
+export const MIGRATION_COMMIT_SUBJECT = 'chore: move docs from bita'
 
 export interface BitaLocation {
   database: string
@@ -54,6 +56,8 @@ export interface MigrationReport {
   docsRoot: string
   counts: MigrationCounts
   docs: { source: 'git' | 'files' | 'none'; commit: string | null }
+  notes: NotesImportReport | null
+  notesError?: string
   migratedAt: string | null
 }
 
@@ -68,14 +72,6 @@ export function migrationStatus(db: DatabaseSync): MigrationStatus {
   return { migrated: at !== null, bitaDatabase: readSetting(db, MIGRATED_FROM_KEY) ?? null, migratedAt: at }
 }
 
-function columns(db: DatabaseSync, table: string): Set<string> {
-  const rows = db.prepare(`PRAGMA table_info("${table}")`).all() as { name: string }[]
-  return new Set(rows.map((row) => row.name))
-}
-
-function hasTable(db: DatabaseSync, table: string): boolean {
-  return queryOne<{ name: string }>(db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`), table) !== undefined
-}
 
 function pick(cols: Set<string>, name: string, fallback: string): string {
   return cols.has(name) ? name : `${fallback} AS ${name}`
@@ -284,19 +280,6 @@ async function git(root: string, args: string[], timeoutMs = 120_000): Promise<s
   return result.stdout
 }
 
-async function pruneEmptyDirs(root: string, dir: string): Promise<void> {
-  let current = dir
-  while (resolve(current) !== resolve(root) && current.startsWith(resolve(root))) {
-    try {
-      if ((await readdir(current)).length > 0) return
-      await rmdir(current)
-    } catch {
-      return
-    }
-    current = dirname(current)
-  }
-}
-
 async function copyDocs(source: string, target: string, snapshot: BitaSnapshot): Promise<{ source: 'git' | 'files' | 'none'; commit: string | null }> {
   const sourceIsRepo = existsSync(join(source, '.git'))
   let mode: 'git' | 'files' | 'none' = 'none'
@@ -312,19 +295,11 @@ async function copyDocs(source: string, target: string, snapshot: BitaSnapshot):
   }
 
   if (mode === 'git') {
-    for (const page of snapshot.pages) {
-      for (const rel of [page.rel_path, `${page.rel_path.slice(0, -3)}.assets`]) {
-        const from = resolveDocPath(source, rel)
-        if (existsSync(from)) await cp(from, resolveDocPath(target, rel), { recursive: true, force: true })
-      }
+    const working = [...snapshot.pages.flatMap((page) => [page.rel_path, `${page.rel_path.slice(0, -3)}.assets`]), ...snapshot.noteFiles]
+    for (const rel of working) {
+      const from = resolveDocPath(source, rel)
+      if (existsSync(from)) await cp(from, resolveDocPath(target, rel), { recursive: true, force: true })
     }
-  }
-
-  for (const rel of snapshot.noteFiles) {
-    const path = resolveDocPath(target, rel)
-    if (!existsSync(path)) continue
-    await rm(path, { force: true })
-    await pruneEmptyDirs(target, dirname(path))
   }
 
   if (mode === 'none' || !(await gitAvailable())) return { source: mode, commit: null }
@@ -350,7 +325,7 @@ export async function migrateFromBita(db: DatabaseSync, options: MigrateOptions)
   const base = { bitaDatabase: location.database, bitaDocs: location.docs, docsRoot }
 
   if (status.migrated) {
-    return { ...base, dryRun: options.dryRun, alreadyMigrated: true, counts: empty, docs: { source: 'none', commit: null }, migratedAt: status.migratedAt }
+    return { ...base, dryRun: options.dryRun, alreadyMigrated: true, counts: empty, docs: { source: 'none', commit: null }, notes: null, migratedAt: status.migratedAt }
   }
   if (!existsSync(location.database)) {
     throw new NotFoundError(`There is no bita database at ${location.database}.`, 'BITA_DB_NOT_FOUND', 'Pass --bita-db <path> or set BITA_DB_PATH.')
@@ -383,7 +358,7 @@ export async function migrateFromBita(db: DatabaseSync, options: MigrateOptions)
 
   if (options.dryRun) {
     const source = existsSync(join(location.docs, '.git')) ? 'git' : existsSync(location.docs) ? 'files' : 'none'
-    return { ...base, dryRun: true, alreadyMigrated: false, counts, docs: { source, commit: null }, migratedAt: null }
+    return { ...base, dryRun: true, alreadyMigrated: false, counts, docs: { source, commit: null }, notes: null, migratedAt: null }
   }
 
   const createdDocs = !existsSync(docsRoot)
@@ -405,7 +380,13 @@ export async function migrateFromBita(db: DatabaseSync, options: MigrateOptions)
     throw error
   }
 
-  return { ...base, dryRun: false, alreadyMigrated: false, counts, docs, migratedAt: at }
+  try {
+    const notes = await importNotesFromBita(db, { dryRun: false, location, docsRoot, now })
+    return { ...base, dryRun: false, alreadyMigrated: false, counts, docs, notes, migratedAt: at }
+  } catch (error) {
+    const notesError = `${error instanceof Error ? error.message : String(error)}. Run "inkwell migrate notes --from-bita" to retry.`
+    return { ...base, dryRun: false, alreadyMigrated: false, counts, docs, notes: null, notesError, migratedAt: at }
+  }
 }
 
 function writeSnapshot(db: DatabaseSync, snapshot: BitaSnapshot, extra: { siteUrl: string | null; at: string; database: string }): void {

@@ -5,6 +5,7 @@ import { findChrome, findDrawio, chromeInstallHint, drawioInstallHint } from '..
 import { gitAvailable } from '../../docs/git.ts'
 import { UsageError } from '../../errors.ts'
 import { bitaLocation, migrateFromBita, migrationStatus } from '../../migrate/from-bita.ts'
+import { importNotesFromBita } from '../../migrate/notes-from-bita.ts'
 import { integration, manifest, register, unregister } from '../../setup.ts'
 import { normalizeSiteUrl } from '../../confluence/refs.ts'
 import { BASE_OPTIONS, parseCommandArgs, readBoolean, readString } from '../args.ts'
@@ -59,6 +60,7 @@ export async function runSetup(argv: string[]): Promise<number> {
     if (!chrome) writeOut(`! Chrome: ${apps.chrome.hint}`)
     if (!drawio) writeOut(`! draw.io: ${apps.drawio.hint}`)
     if (!migration.migrated) writeOut('If bita has docs, bring them over with "inkwell migrate --from-bita" (try --dry-run first).')
+    else writeOut('Entry notes written by bita before 0.2.0 come over with "inkwell migrate notes --from-bita" (safe to repeat).')
   }
   return steps.some((step) => step.state === 'failed') ? 1 : 0
 }
@@ -95,9 +97,23 @@ export async function runMigrate(argv: string[]): Promise<number> {
     else writeOut(status.migrated ? `Migrated from ${status.bitaDatabase ?? 'bita'} on ${status.migratedAt}.` : 'Not migrated from bita.')
     return 0
   }
-  if (!readBoolean(args, 'from-bita')) throw new UsageError('Usage: inkwell migrate --from-bita [--dry-run] [--bita-db PATH] [--bita-docs DIR] | inkwell migrate status')
+  const usage = 'Usage: inkwell migrate --from-bita [--dry-run] [--bita-db PATH] [--bita-docs DIR] | inkwell migrate notes --from-bita [--dry-run] | inkwell migrate status'
+  if (!readBoolean(args, 'from-bita') || (args.positionals[0] !== undefined && args.positionals[0] !== 'notes')) throw new UsageError(usage)
 
   const location = bitaLocation(process.env, { database: readString(args, 'bita-db'), docs: readString(args, 'bita-docs') })
+  if (args.positionals[0] === 'notes') {
+    const notes = await withLocalContext(args, (ctx) => importNotesFromBita(ctx.db, { dryRun: readBoolean(args, 'dry-run'), location, docsRoot: ctx.docsRoot, now: ctx.now }))
+    if (json) {
+      writeJson(successEnvelope('migrate notes', notes))
+      return 0
+    }
+    const c = notes.counts
+    writeOut(`${notes.dryRun ? 'Would bring' : 'Brought'} ${c.imported} of ${c.scanned} entry notes from bita; ${c.already} already here, ${c.missing} missing on disk, ${c.conflicts} in conflict.`)
+    for (const item of notes.items.filter((entry) => entry.action === 'conflict' || entry.action === 'missing')) writeOut(`  #${item.entryId} ${item.relPath}: ${item.reason ?? item.action}`)
+    if (notes.commit) writeOut(`commit ${notes.commit.slice(0, 7)}`)
+    if (notes.dryRun) writeOut('Nothing was written: --dry-run.')
+    return 0
+  }
   const report = await withLocalContext(args, (ctx) =>
     migrateFromBita(ctx.db, { dryRun: readBoolean(args, 'dry-run'), location, docsRoot: ctx.docsRoot, now: ctx.now }),
   )
@@ -111,9 +127,11 @@ export async function runMigrate(argv: string[]): Promise<number> {
   }
   const c = report.counts
   writeOut(
-    `${report.dryRun ? 'Would bring' : 'Brought'} ${c.spaces} spaces (${c.spacesReused} already here), ${c.pages} pages, ${c.entryLinks + c.issueLinks} links, ${c.refs} refs, ${c.backlog} backlog items and ${c.confluenceMaps} Confluence maps; ${c.noteFiles} per-entry notes stay out.`,
+    `${report.dryRun ? 'Would bring' : 'Brought'} ${c.spaces} spaces (${c.spacesReused} already here), ${c.pages} pages, ${c.entryLinks + c.issueLinks} links, ${c.refs} refs, ${c.backlog} backlog items and ${c.confluenceMaps} Confluence maps and ${c.noteFiles} entry notes.`,
   )
   writeOut(`docs: ${report.bitaDocs} -> ${report.docsRoot} (${report.docs.source})${report.docs.commit ? ` at ${report.docs.commit.slice(0, 7)}` : ''}`)
+  if (report.notesError) writeOut(`! entry notes were not imported: ${report.notesError}`)
+  if (report.notes) writeOut(`entry notes: ${report.notes.counts.imported} imported, ${report.notes.counts.missing} missing, ${report.notes.counts.conflicts} in conflict`)
   if (report.dryRun) writeOut('Nothing was written: --dry-run.')
   return 0
 }
