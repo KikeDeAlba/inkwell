@@ -1,6 +1,6 @@
 {
   "name": "@kikedealba/inkwell",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Living technical documentation from the terminal: page trees in markdown with git history, a backlog, diagrams, PDF export and Confluence sync.",
   "license": "MIT",
   "author": "Jesus Enrique De Alba Gaytan",
@@ -52,7 +52,7 @@
     "inkwell": "node src/bin/inkwell.ts"
   },
   "dependencies": {
-    "@kikedealba/kit": "^0.1.1",
+    "@kikedealba/kit": "^0.2.0",
     "marked": "^18.1.0"
   },
   "devDependencies": {
