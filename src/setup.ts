@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { agents } from '@kikedealba/kit'
-import { defineManifest, registerTool, unregisterTool, type ToolManifest } from '@kikedealba/kit/registry'
+import type { PlatformContext } from '@kikedealba/kit/platform'
+import { defineManifest, registerTool, stableBin, unregisterTool, type ToolManifest } from '@kikedealba/kit/registry'
 import { PACKAGE_ROOT, VERSION } from './version.ts'
 
 export const CAPABILITIES = [
@@ -28,14 +29,18 @@ export function binCommand(): string[] {
   return [process.execPath, binEntry()]
 }
 
-export function manifest(): ToolManifest {
+export async function stableBinCommand(ctx?: PlatformContext): Promise<string[]> {
+  return stableBin('inkwell', VERSION, binCommand(), ctx)
+}
+
+export function manifest(bin: readonly string[] = binCommand()): ToolManifest {
   return defineManifest({
     name: 'inkwell',
     version: VERSION,
     description: 'Living technical documentation: pages, backlog, history, diagrams, PDF and Confluence sync',
-    bin: binCommand(),
+    bin: [...bin],
     capabilities: CAPABILITIES,
-    subscribes: [{ tool: 'bita', events: SUBSCRIBED_EVENTS, command: [...binCommand(), 'bita-hook'] }],
+    subscribes: [{ tool: 'bita', events: SUBSCRIBED_EVENTS, command: [...bin, 'bita-hook'] }],
     homepage: 'https://github.com/KikeDeAlba/inkwell',
     install: INSTALL_HINT,
   })
@@ -77,8 +82,8 @@ export function integration(options: { drawio?: boolean } = {}): agents.AgentInt
   }
 }
 
-export async function register(): Promise<string> {
-  return registerTool(manifest())
+export async function register(ctx?: PlatformContext): Promise<string> {
+  return registerTool(manifest(await stableBinCommand(ctx)))
 }
 
 export async function unregister(): Promise<boolean> {
