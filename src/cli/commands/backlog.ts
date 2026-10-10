@@ -7,7 +7,7 @@ import { renderTable } from '../table.ts'
 import { spaceIdArg } from '../spaces.ts'
 import { inTransaction } from '../../db/open.ts'
 import { entryRef, pagesOfEntry } from '../../db/page-links.ts'
-import { findSpaceForBitaProject } from '../../db/spaces.ts'
+import { linkedSpaceFor } from '../../db/spaces.ts'
 import { findBita, requireBita, requireEntry, type BitaEntry } from '../../integrations/bita.ts'
 import { listPages, requirePage, type DocPageRow } from '../../db/pages.ts'
 import {
@@ -107,7 +107,7 @@ interface Placement {
 function placedEntry(ctx: LocalContext, entry: BitaEntry): Placement {
   return {
     originRef: entryRef(entry.id),
-    projectId: entry.projectId === null ? null : (findSpaceForBitaProject(ctx.db, entry.projectId)?.id ?? null),
+    projectId: entry.projectId === null ? null : (linkedSpaceFor(ctx.db, entry.projectId, entry.projectName)?.id ?? null),
     pageId: pagesOfEntry(ctx.db, entry.id)[0]?.pageId ?? null,
   }
 }
