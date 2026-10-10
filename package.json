@@ -1,0 +1,62 @@
+{
+  "name": "@kikedealba/inkwell",
+  "version": "0.1.0",
+  "description": "Living technical documentation from the terminal: page trees in markdown with git history, a backlog, diagrams, PDF export and Confluence sync.",
+  "license": "MIT",
+  "author": "Jesus Enrique De Alba Gaytan",
+  "homepage": "https://github.com/KikeDeAlba/inkwell#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KikeDeAlba/inkwell.git"
+  },
+  "bugs": {
+    "url": "https://github.com/KikeDeAlba/inkwell/issues"
+  },
+  "keywords": [
+    "documentation",
+    "markdown",
+    "git",
+    "confluence",
+    "diagrams",
+    "mermaid",
+    "drawio",
+    "cli",
+    "claude-code",
+    "gemini-cli",
+    "codex",
+    "opencode"
+  ],
+  "type": "module",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "inkwell": "dist/bin/inkwell.js"
+  },
+  "files": [
+    "dist",
+    "assets",
+    "skill",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "inkwell": "node src/bin/inkwell.ts"
+  },
+  "dependencies": {
+    "@kikedealba/kit": "^0.1.1",
+    "marked": "^18.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.2"
+  }
+}
