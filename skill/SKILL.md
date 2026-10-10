@@ -10,7 +10,9 @@ description: >-
   esto", "actualiza la página de", "crea una página para", "anota este
   pendiente", "registra el hallazgo", "cierra APT-14", "haz un diagrama de",
   "publícalo en Confluence", "sincroniza con Confluence", "exporta la página a
-  PDF", "qué dice la documentación de".
+  PDF", "qué dice la documentación de". También lleva la nota de cada entrada
+  de tiempo de bita mientras corre el cronómetro: "documenta lo que llevo",
+  "anota esto en la nota de la entrada", "qué dice la nota de la entrada 42".
 ---
 
 # inkwell
@@ -20,8 +22,60 @@ archivo, dentro de un repositorio git propio. Cada página cuelga de un
 **espacio** (un sistema, un cliente, un producto) y puede tener subpáginas.
 Todo comando acepta `--json` y responde con un sobre `{ ok, data, error }`.
 
-Si bita está instalado, las páginas se atan a sus entradas de tiempo; si atl
-está instalado, inkwell publica y sincroniza con Confluence a través de él.
+Si bita está instalado, las páginas se atan a sus entradas de tiempo y cada
+entrada tiene su **nota** (ver "Documentar mientras corre el cronómetro"); si
+atl está instalado, inkwell publica y sincroniza con Confluence a través de él.
+
+## Documentar mientras corre el cronómetro
+
+Cada entrada de tiempo de bita tiene una **nota**: un markdown en el repositorio
+de inkwell, en `<espacio>/<aaaa>/<mm>/<dd>-<id>-<título>.md`. La nota cuenta qué
+pasó en ese bloque de trabajo; lo que debe sobrevivir al bloque va a una página.
+
+inkwell la mantiene sola a partir de los eventos de bita: al arrancar el
+cronómetro crea el esqueleto (Contexto, Qué se hizo, Pendiente), al corregir el
+título o el proyecto la renombra o la mueve, al parar anota el fin y la
+duración, al unir entradas junta sus notas en la que sobrevive, y al cancelar o
+borrar la entrada la borra. Tú solo escribes el contenido.
+
+Para saber en qué entrada escribir, corre `bita ls --json`: lista los
+cronómetros que están corriendo; toma el `id` del que corresponde al trabajo
+que estás haciendo (si solo hay uno, ese). Luego escribe sección por sección,
+mandando el texto por stdin:
+
+```
+inkwell note save <entryId> --section "Contexto" --md - <<'MD'
+Por qué se abrió este trabajo: el WAF bloquea /admin desde la VPN (VB-12).
+MD
+```
+
+Qué va en cada sección:
+
+- **Contexto**: por qué se hace, qué se pidió, el ticket o la conversación de
+  origen y el estado en que estaba el sistema al empezar.
+- **Qué se hizo**: los cambios concretos, en pasado y con nombres reales
+  (archivos, recursos, comandos, ramas, MRs). Se actualiza en cada avance
+  significativo reescribiendo la sección completa, no agregando renglones
+  sueltos.
+- **Pendiente**: lo que quedó abierto al cerrar el bloque. Si es trabajo que
+  alguien más debe retomar, además va al backlog (`inkwell backlog add`).
+- Opcionales, si hay material: **Decisiones** (qué se eligió y por qué),
+  **Hallazgos** (lo que se descubrió), **Verificación** (cómo se comprobó) y
+  **Tocado** (lo llenan `--file`, `--command` y `--resource`).
+
+`--section` reemplaza esa sección entera; las demás quedan como están. Escribe
+antes de parar el cronómetro, para que la nota quede completa cuando se cierre.
+
+```
+inkwell note show <entryId> --json          # la nota con sus secciones y su front matter
+inkwell note get <entryId> --raw            # solo el markdown
+inkwell note path <entryId> [--create]      # dónde vive (o dónde viviría)
+inkwell note ls today                       # las notas de hoy (también week, month, --from/--to, --project)
+inkwell note search "waf" [--project APT]   # buscar en las notas
+```
+
+`--entry <id>` sirve en lugar del id posicional. Las notas que bita escribió
+antes se traen con `inkwell migrate notes --from-bita` (se puede repetir).
 
 ## Espacios
 

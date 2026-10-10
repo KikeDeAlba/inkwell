@@ -143,6 +143,42 @@ const INITIAL_SCHEMA: readonly string[] = [
   `CREATE UNIQUE INDEX confluence_page_map_remote ON confluence_page_map (site, confluence_id)`,
 ]
 
-export const MIGRATIONS: readonly Migration[] = [{ version: 1, statements: INITIAL_SCHEMA }]
+const ENTRY_NOTES: readonly string[] = [
+  `CREATE TABLE entry_notes (
+     rel_path TEXT PRIMARY KEY,
+     ref TEXT NOT NULL,
+     entry_id INTEGER NOT NULL,
+     kind TEXT NOT NULL DEFAULT 'note',
+     space_id INTEGER REFERENCES spaces (id) ON DELETE SET NULL,
+     title TEXT NOT NULL DEFAULT '',
+     title_slug TEXT NOT NULL DEFAULT '',
+     source TEXT NOT NULL DEFAULT 'manual',
+     section_count INTEGER NOT NULL DEFAULT 0,
+     byte_size INTEGER NOT NULL DEFAULT 0,
+     checksum TEXT NOT NULL DEFAULT '',
+     repo_slug TEXT,
+     branch TEXT,
+     head_sha TEXT,
+     project_id INTEGER,
+     project_name TEXT,
+     entry_kind TEXT,
+     started_at TEXT NOT NULL,
+     stopped_at TEXT,
+     issue_key TEXT,
+     created_at TEXT NOT NULL,
+     recorded_at TEXT NOT NULL,
+     CHECK (kind IN ('note', 'appendix')),
+     CHECK (ref = 'bita:entry:' || entry_id),
+     CHECK (rel_path <> '' AND rel_path NOT LIKE '/%' AND rel_path NOT LIKE '%..%')
+   )`,
+  `CREATE INDEX entry_notes_entry ON entry_notes (entry_id, kind)`,
+  `CREATE INDEX entry_notes_started ON entry_notes (started_at)`,
+  `CREATE INDEX entry_notes_space ON entry_notes (space_id)`,
+]
+
+export const MIGRATIONS: readonly Migration[] = [
+  { version: 1, statements: INITIAL_SCHEMA },
+  { version: 2, statements: ENTRY_NOTES },
+]
 
 export const LATEST_VERSION = MIGRATIONS.reduce((highest, migration) => Math.max(highest, migration.version), 0)
