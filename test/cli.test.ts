@@ -29,7 +29,7 @@ test('capabilities lists every documentation capability of the contract', (t) =>
   const data = box.ok('capabilities')
   assert.equal(data.name, 'inkwell')
   assert.deepEqual(data.capabilities, CAPABILITIES)
-  for (const capability of ['docs.page.read', 'docs.page.write', 'docs.backlog', 'docs.history', 'docs.propose', 'docs.diagrams', 'docs.export.pdf', 'docs.confluence.sync']) {
+  for (const capability of ['docs.page.read', 'docs.page.write', 'docs.backlog', 'docs.history', 'docs.propose', 'docs.diagrams', 'docs.export.pdf', 'docs.confluence.sync', 'docs.entry-notes']) {
     assert.ok(data.capabilities.includes(capability), capability)
   }
 })
@@ -71,6 +71,9 @@ test('spaces, pages, links and backlog work from the CLI, and --space is an alia
   const linked = box.ok('page', 'link', pageId, '--entry', '77', '--summary', 'Se abrió el WAF.')
   assert.equal(linked.page.entryCount, 1)
   assert.equal(linked.page.durationSeconds, 5400)
+  const byEntry = box.ok('page', 'ls', '--entry', '77')
+  assert.deepEqual(byEntry.pages.map((page: { pageId: number }) => page.pageId), [Number(pageId)])
+  assert.deepEqual(box.ok('page', 'ls', '--entry', '78').pages, [])
 
   const child = box.ok('page', 'new', 'WAF', '--from-entry', '77', '--parent', pageId)
   assert.equal(child.page.parentId, Number(pageId))

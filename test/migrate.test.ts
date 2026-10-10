@@ -70,7 +70,7 @@ function bitaFixture(box: Sandbox): { db: string; docs: string } {
   return { db: dbPath, docs }
 }
 
-test('migrate --from-bita reports with --dry-run, copies everything once, keeps the history and drops the entry notes', (t) => {
+test('migrate --from-bita reports with --dry-run, copies everything once, keeps the history and brings the entry notes', (t) => {
   const box = sandbox(t)
   const bita = bitaFixture(box)
   box.env['BITA_DB_PATH'] = bita.db
@@ -117,11 +117,16 @@ test('migrate --from-bita reports with --dry-run, copies everything once, keeps 
   assert.equal(box.ok('backlog', 'ls', '--project', '6')[0].key, `${twin.key}-14`)
 
   const docs = box.env['INKWELL_DOCS_DIR'] as string
-  assert.equal(existsSync(join(docs, 'apartados', '2026', '09', '20-10-ajustar-waf.md')), false)
-  assert.equal(existsSync(join(docs, 'apartados', '2026')), false)
+  assert.equal(readFileSync(join(docs, 'apartados', '2026', '09', '20-10-ajustar-waf.md'), 'utf8'), '# Nota\n')
+  assert.equal(done.notes.counts.imported, 1)
+  const note = box.ok('note', 'show', '10')
+  assert.equal(note.doc.relPath, 'apartados/2026/09/20-10-ajustar-waf.md')
+  assert.equal(note.title, 'Ajustar WAF')
+  assert.equal(note.spaceId, space.id)
+  assert.equal(note.durationSeconds, 3600)
   assert.equal(readFileSync(join(docs, 'apartados', 'arquitectura.assets', 'red.drawio'), 'utf8'), '<mxfile/>')
   const log = gitIn(docs, box.env, 'log', '--format=%s', 'main').trim().split('\n')
-  assert.deepEqual(log, ['chore: move docs from bita and drop per-entry notes', 'docs(apartados): create arquitectura'])
+  assert.deepEqual(log, ['chore: move docs from bita', 'docs(apartados): create arquitectura'])
   assert.match(gitIn(docs, box.env, 'branch', '--list'), /proposal\/x/)
   assert.equal(gitIn(docs, box.env, 'remote').trim(), '')
   assert.equal(box.ok('config', 'get').site, 'https://acme.atlassian.net')

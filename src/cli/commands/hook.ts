@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs'
-import type { DatabaseSync } from 'node:sqlite'
 import { clearOriginRef, repointOriginRef } from '../../db/backlog.ts'
 import { inTransaction } from '../../db/open.ts'
 import { entryRef, linkEntryToPage, linksOfRef, mergeEntryLinks, refreshEntrySnapshot, removeEntryLinks, type EntrySnapshot } from '../../db/page-links.ts'
 import { findPage } from '../../db/pages.ts'
 import { UsageError } from '../../errors.ts'
-import { findBita, snapshotOf, toBitaEntry } from '../../integrations/bita.ts'
+import { findBita, snapshotOf, toBitaEntry, type BitaEntry } from '../../integrations/bita.ts'
+import type { DocsContext } from '../../docs/context.ts'
+import { mergeEntryNotes, recordEntryNote, removeEntryNotes } from '../../docs/entry-note.ts'
 import { BASE_OPTIONS, parseCommandArgs, readBoolean, readString } from '../args.ts'
 import { withLocalContext } from '../context.ts'
 import { successEnvelope, writeJson, writeOut } from '../output.ts'
@@ -20,6 +21,15 @@ export interface HookOutcome {
   linksRefreshed: number
   linksAdded: number
   backlogUpdated: number
+  note: NoteOutcome
+}
+
+export interface NoteOutcome {
+  action: 'none' | 'created' | 'updated' | 'moved' | 'removed' | 'merged'
+  relPath: string | null
+  renamedFrom: string | null
+  removed: string[]
+  error: string | null
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -46,11 +56,37 @@ function snapshotFromEvent(entry: Record<string, unknown>): EntrySnapshot | null
   return parsed === null ? null : snapshotOf(parsed)
 }
 
-export async function handleBitaEvent(db: DatabaseSync, document: Record<string, unknown>, now: Date): Promise<HookOutcome> {
+async function noteStep(outcome: HookOutcome, run: () => Promise<void>): Promise<void> {
+  try {
+    await run()
+  } catch (error) {
+    outcome.note.error = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function upsertNote(ctx: DocsContext, outcome: HookOutcome, entry: BitaEntry, event: string): Promise<void> {
+  const recorded = await recordEntryNote(ctx, entry, { source: event, create: event === 'start', commit: { reason: `bita ${event}` } })
+  if (recorded === null) return
+  outcome.note.relPath = recorded.relPath
+  outcome.note.renamedFrom = recorded.renamedFrom
+  outcome.note.action = recorded.created ? 'created' : recorded.renamedFrom !== null ? 'moved' : recorded.changed ? 'updated' : 'none'
+}
+
+export async function handleBitaEvent(ctx: DocsContext, document: Record<string, unknown>): Promise<HookOutcome> {
+  const { db, now } = ctx
   const event = typeof document['event'] === 'string' ? document['event'] : process.env['KIT_EVENT'] ?? ''
   const entry = record(document['entry'])
   const entryId = Number.isInteger(entry['id']) ? (entry['id'] as number) : null
-  const outcome: HookOutcome = { event, entryId, linksRemoved: 0, linksMerged: 0, linksRefreshed: 0, linksAdded: 0, backlogUpdated: 0 }
+  const outcome: HookOutcome = {
+    event,
+    entryId,
+    linksRemoved: 0,
+    linksMerged: 0,
+    linksRefreshed: 0,
+    linksAdded: 0,
+    backlogUpdated: 0,
+    note: { action: 'none', relPath: null, renamedFrom: null, removed: [], error: null },
+  }
   if (entryId === null) return outcome
   const at = now.toISOString()
 
@@ -58,6 +94,10 @@ export async function handleBitaEvent(db: DatabaseSync, document: Record<string,
     inTransaction(db, () => {
       outcome.linksRemoved = removeEntryLinks(db, entryId).length
       outcome.backlogUpdated = clearOriginRef(db, entryRef(entryId))
+    })
+    await noteStep(outcome, async () => {
+      outcome.note.removed = await removeEntryNotes(ctx, entryId, `bita ${event}`)
+      if (outcome.note.removed.length > 0) outcome.note.action = 'removed'
     })
     return outcome
   }
@@ -72,6 +112,18 @@ export async function handleBitaEvent(db: DatabaseSync, document: Record<string,
     const fresh = bita === null ? null : await bita.entry(entryId).catch(() => null)
     const snapshot = fresh === null ? snapshotFromEvent(entry) : snapshotOf(fresh, now)
     if (snapshot !== null) outcome.linksRefreshed = refreshEntrySnapshot(db, entryId, snapshot, at)
+    const survivor = fresh ?? toBitaEntry(entry)
+    if (survivor !== null && sources.length > 0) {
+      await noteStep(outcome, async () => {
+        const merged = await mergeEntryNotes(ctx, sources, survivor)
+        outcome.note.removed = merged.absorbed
+        if (merged.target !== null) {
+          outcome.note.relPath = merged.target.relPath
+          outcome.note.renamedFrom = merged.target.renamedFrom
+          outcome.note.action = 'merged'
+        }
+      })
+    }
     return outcome
   }
 
@@ -86,6 +138,8 @@ export async function handleBitaEvent(db: DatabaseSync, document: Record<string,
         outcome.linksAdded += 1
       }
     })
+    const parsed = toBitaEntry(entry)
+    if (parsed !== null) await noteStep(outcome, () => upsertNote(ctx, outcome, parsed, event))
   }
   return outcome
 }
@@ -100,8 +154,8 @@ export async function runBitaHook(argv: string[]): Promise<number> {
   } catch {
     throw new UsageError('bita-hook expects the event document as JSON on stdin.')
   }
-  const outcome = await withLocalContext(args, (ctx) => handleBitaEvent(ctx.db, document, ctx.now))
+  const outcome = await withLocalContext(args, (ctx) => handleBitaEvent(ctx, document))
   if (readBoolean(args, 'json')) writeJson(successEnvelope('bita-hook', outcome))
-  else writeOut(`${outcome.event} #${outcome.entryId ?? '?'}: removed ${outcome.linksRemoved}, merged ${outcome.linksMerged}, refreshed ${outcome.linksRefreshed}, added ${outcome.linksAdded}`)
+  else writeOut(`${outcome.event} #${outcome.entryId ?? '?'}: removed ${outcome.linksRemoved}, merged ${outcome.linksMerged}, refreshed ${outcome.linksRefreshed}, added ${outcome.linksAdded}; note ${outcome.note.action}${outcome.note.relPath ? ` ${outcome.note.relPath}` : ''}${outcome.note.error ? ` (failed: ${outcome.note.error})` : ''}`)
   return 0
 }

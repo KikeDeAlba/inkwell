@@ -23,6 +23,15 @@ Pages:
   inkwell page rm <pageId> [--recursive]
   inkwell page history <pageId> [--limit N] | diff <pageId> [SHA] | restore <pageId> <SHA>
 
+Entry notes (one markdown note per bita entry):
+  inkwell note path <entryId> [--create] | --draft
+  inkwell note show <entryId> | --path <relPath> [--no-markdown]
+  inkwell note get <entryId> [--raw]
+  inkwell note save <entryId> [--section "<H2>"] [--md FILE|-] [--note-md FILE|-] [--file F --command C --resource R]
+  inkwell note ls <entryId> | ls [today|yesterday|week|last-week|month|last-month] [--from D --to D] [--project X] [--limit N]
+  inkwell note search "<text>" [--project X] [--section H2]
+  --entry <id> works in place of the positional id.
+
 Spaces:
   inkwell space ls [--all] | show <space>
   inkwell space add <name> [--key K] [--confluence <url|KEY>] [--site <url>] [--pull on|off] [--push on|off]
@@ -54,6 +63,7 @@ Setup:
   inkwell setup [--agents detected|all|claude,opencode,codex,gemini] [--no-agents] [--no-drawio]
   inkwell uninstall
   inkwell migrate --from-bita [--dry-run] [--bita-db PATH] [--bita-docs DIR] | migrate status
+  inkwell migrate notes --from-bita [--dry-run] [--bita-db PATH] [--bita-docs DIR]
   inkwell config get | set <timezone|site> <value>
   inkwell capabilities [--json]
 
@@ -68,10 +78,11 @@ function commandName(argv: readonly string[]): string {
   }
   const first = words[0]
   if (first === undefined) return 'help'
-  if (['page', 'backlog', 'space', 'diagrams', 'branch', 'git', 'confluence', 'export', 'migrate', 'config'].includes(first) && words[1] !== undefined) {
+  if (['page', 'backlog', 'space', 'diagrams', 'branch', 'git', 'confluence', 'export', 'migrate', 'config', 'note'].includes(first) && words[1] !== undefined) {
     if (first === 'page' && words[1] === 'ref' && words[2] !== undefined) return `page ref ${words[2]}`
     if (first === 'confluence' && words[1] === 'conflict' && words[2] !== undefined) return `confluence conflict ${words[2]}`
     if (first === 'page' && words[1] === 'asset') return 'page asset path'
+    if (first === 'note' && !['path', 'save', 'set', 'get', 'show', 'ls', 'search'].includes(words[1])) return 'note get'
     return `${first} ${words[1]}`
   }
   return first
@@ -98,6 +109,8 @@ async function dispatch(argv: string[]): Promise<number> {
     case 'show':
     case 'search':
       return (await import('./commands/docs.ts')).runDocs(command, rest)
+    case 'note':
+      return (await import('./commands/note.ts')).runNote(rest)
     case 'page':
       return (await import('./commands/page.ts')).runPage(rest)
     case 'space':
