@@ -109,6 +109,18 @@ export function findSpaceForBitaProject(db: DatabaseSync, projectId: number): Sp
   return findSpaceByExternalRef(db, bitaProjectRef(projectId))
 }
 
+export function isStaleBitaLink(space: SpaceRow, projectName: string | null | undefined): boolean {
+  if (!projectName || space.active) return false
+  return space.name.trim().toLowerCase() !== projectName.trim().toLowerCase()
+}
+
+export function linkedSpaceFor(db: DatabaseSync, projectId: number, projectName: string | null | undefined, repair = true): SpaceRow | undefined {
+  const linked = findSpaceForBitaProject(db, projectId)
+  if (!linked || !isStaleBitaLink(linked, projectName)) return linked
+  if (repair) updateSpace(db, linked.id, { externalRef: null })
+  return undefined
+}
+
 export function listSpaces(db: DatabaseSync, includeInactive = true): SpaceRow[] {
   const sql = includeInactive
     ? 'SELECT * FROM spaces ORDER BY name COLLATE NOCASE'
@@ -120,7 +132,8 @@ export function resolveSpaceArg(db: DatabaseSync, raw: string): SpaceRow {
   const trimmed = raw.trim()
   const asNumber = Number(trimmed)
   if (Number.isInteger(asNumber) && asNumber > 0) {
-    const found = findSpaceById(db, asNumber) ?? findSpaceForBitaProject(db, asNumber) ?? adoptBitaProject(db, trimmed)
+    const linked = findSpaceForBitaProject(db, asNumber)
+    const found = findSpaceById(db, asNumber) ?? (linked?.active ? linked : (adoptBitaProject(db, trimmed) ?? linked))
     if (found) return found
     throw new NotFoundError(`No space with id ${asNumber}.`, 'PROJECT_NOT_FOUND', 'Run "inkwell space ls" to see them.')
   }
@@ -203,7 +216,7 @@ export { takenSpaceKeys }
 export function adoptBitaProject(db: DatabaseSync, ref: string): SpaceRow | undefined {
   const project = bitaProjectLookup()(ref)
   if (!project) return undefined
-  const linked = findSpaceForBitaProject(db, project.id)
+  const linked = linkedSpaceFor(db, project.id, project.name)
   if (linked) return linked
   const sameName = findSpaceByName(db, project.name)
   if (sameName) return sameName.externalRef ? sameName : updateSpace(db, sameName.id, { externalRef: bitaProjectRef(project.id) })
