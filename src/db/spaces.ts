@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
+import { bitaProjectLookup } from '../integrations/bita-projects.ts'
 import { ConflictError, NotFoundError, UsageError } from '../errors.ts'
 import { queryAll, queryOne } from './query.ts'
 import { fromBoolean, toBoolean, type ConfluenceKind, type SpaceRow } from './rows.ts'
@@ -119,14 +120,15 @@ export function resolveSpaceArg(db: DatabaseSync, raw: string): SpaceRow {
   const trimmed = raw.trim()
   const asNumber = Number(trimmed)
   if (Number.isInteger(asNumber) && asNumber > 0) {
-    const found = findSpaceById(db, asNumber) ?? findSpaceForBitaProject(db, asNumber)
+    const found = findSpaceById(db, asNumber) ?? findSpaceForBitaProject(db, asNumber) ?? adoptBitaProject(db, trimmed)
     if (found) return found
     throw new NotFoundError(`No space with id ${asNumber}.`, 'PROJECT_NOT_FOUND', 'Run "inkwell space ls" to see them.')
   }
   const found =
     findSpaceByName(db, trimmed) ??
     findSpaceByKey(db, trimmed) ??
-    (trimmed.includes(':') ? findSpaceByExternalRef(db, trimmed) : undefined)
+    (trimmed.includes(':') ? findSpaceByExternalRef(db, trimmed) : undefined) ??
+    adoptBitaProject(db, trimmed)
   if (found) return found
   throw new NotFoundError(`No space named or keyed "${raw}".`, 'PROJECT_NOT_FOUND', 'Run "inkwell space ls" to see them, or create it with "inkwell space add".')
 }
@@ -197,3 +199,27 @@ export function setSpaceLastSync(db: DatabaseSync, id: number, at: string): void
 }
 
 export { takenSpaceKeys }
+
+export function adoptBitaProject(db: DatabaseSync, ref: string): SpaceRow | undefined {
+  const project = bitaProjectLookup()(ref)
+  if (!project) return undefined
+  const linked = findSpaceForBitaProject(db, project.id)
+  if (linked) return linked
+  const sameName = findSpaceByName(db, project.name)
+  if (sameName) return sameName.externalRef ? sameName : updateSpace(db, sameName.id, { externalRef: bitaProjectRef(project.id) })
+  const keyFree = project.key !== null && !findSpaceByKey(db, project.key)
+  const space = insertSpace(db, {
+    name: project.name,
+    ...(keyFree ? { key: project.key } : {}),
+    externalRef: bitaProjectRef(project.id),
+    clientName: project.clientName,
+    active: project.active,
+    createdAt: new Date().toISOString(),
+  })
+  return updateSpace(db, space.id, {
+    ...(project.site ? { site: project.site } : {}),
+    ...(project.confluence ? { confluence: project.confluence } : {}),
+    syncPull: project.syncPull,
+    syncPush: project.syncPush,
+  })
+}

@@ -1,6 +1,6 @@
 {
   "name": "@kikedealba/inkwell",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Living technical documentation from the terminal: page trees in markdown with git history, a backlog, diagrams, PDF export and Confluence sync.",
   "license": "MIT",
   "author": "Jesus Enrique De Alba Gaytan",
@@ -48,7 +48,7 @@
     "build": "tsc -p tsconfig.build.json",
     "prepack": "pnpm build",
     "typecheck": "tsc --noEmit",
-    "test": "node --test \"test/**/*.test.ts\"",
+    "test": "node --import ./test/helpers/isolate.ts --test \"test/**/*.test.ts\"",
     "inkwell": "node src/bin/inkwell.ts"
   },
   "dependencies": {
