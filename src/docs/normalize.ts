@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { readdir, readFile, writeFile } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { join, relative, sep } from 'node:path'
 
 export interface NormalizedColumn {
   table: string
@@ -36,7 +36,7 @@ export async function normalizeDocFiles(root: string, dryRun: boolean): Promise<
     const normalized = text.normalize('NFC')
     if (normalized === text) continue
     if (!dryRun) await writeFile(file, normalized, 'utf8')
-    changed.push(relative(root, file))
+    changed.push(relative(root, file).split(sep).join('/'))
   }
   return changed
 }

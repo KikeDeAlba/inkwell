@@ -1,11 +1,12 @@
 import { strict as assert } from 'node:assert'
+import { resolve, sep } from 'node:path'
 import { test } from 'node:test'
 import { issueUrl } from '../src/domain/jira.ts'
 import { MAX_PAGE_DEPTH, pageRelPath } from '../src/docs/layout.ts'
 import { resolveDocPath } from '../src/docs/paths.ts'
 import { slugify, titleSlug } from '../src/docs/slug.ts'
 
-const ROOT = '/tmp/bita-docs'
+const ROOT = resolve('/tmp/inkwell-docs')
 
 test('a page path nests the space, its ancestors and its own slug', () => {
   assert.equal(
@@ -26,7 +27,7 @@ test('a hostile title cannot climb out of the docs root', () => {
     const relPath = pageRelPath({ projectName: 'Pharma STI', ancestorSlugs: [], slug })
     const resolved = resolveDocPath(ROOT, relPath)
 
-    assert.equal(resolved.startsWith(`${ROOT}/`), true, `escaped with "${title}"`)
+    assert.equal(resolved.startsWith(`${ROOT}${sep}`), true, `escaped with "${title}"`)
     assert.equal(relPath.includes('..'), false, `kept a climb with "${title}"`)
   }
 })
@@ -35,7 +36,7 @@ test('an ancestor slug is a slug, so a deep path stays inside too', () => {
   const ancestors = ['../..', 'a/b'].map((value) => slugify(value) || 'seccion')
   const relPath = pageRelPath({ projectName: 'Pharma STI', ancestorSlugs: ancestors, slug: 'hoja' })
 
-  assert.equal(resolveDocPath(ROOT, relPath).startsWith(`${ROOT}/`), true)
+  assert.equal(resolveDocPath(ROOT, relPath).startsWith(`${ROOT}${sep}`), true)
 })
 
 test('the depth limit leaves room for space, page and subpage', () => {

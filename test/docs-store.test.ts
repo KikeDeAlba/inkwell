@@ -24,7 +24,7 @@ test('writes a document into a directory that does not exist yet', async () => {
   const result = await writeDocument(path, emptyDocument(frontMatter(), 'Thing'))
   assert.equal(result.created, true)
   assert.equal(result.changed, true)
-  assert.equal(statSync(path).mode & 0o777, 0o600)
+  if (process.platform !== 'win32') assert.equal(statSync(path).mode & 0o777, 0o600)
 
   const back = await readDocument(path)
   assert.equal(back?.title, 'Thing')

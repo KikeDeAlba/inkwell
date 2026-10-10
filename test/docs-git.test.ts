@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { pathToFileURL } from 'node:url'
 
 const base = mkdtempSync(join(tmpdir(), 'inkwell-docs-git-'))
 process.env['GIT_CONFIG_GLOBAL'] = join(base, 'gitconfig')
@@ -151,7 +152,7 @@ test('concurrent writes in one process and across processes all land, one commit
   const gitModule = join(repo, 'src/docs/git.ts')
   const children = Array.from({ length: 4 }, (_, index) => {
     writeFileSync(join(docsRoot, `child-${index}.md`), `child ${index}\n`)
-    const script = `const { commitDocs } = await import(${JSON.stringify(gitModule)}); const sha = await commitDocs(${JSON.stringify(docsRoot)}, ['child-${index}.md'], { source: 'manual', subject: 'docs: child ${index}' }); if (!sha) process.exit(3)`
+    const script = `const { commitDocs } = await import(${JSON.stringify(pathToFileURL(gitModule).href)}); const sha = await commitDocs(${JSON.stringify(docsRoot)}, ['child-${index}.md'], { source: 'manual', subject: 'docs: child ${index}' }); if (!sha) process.exit(3)`
     return new Promise<number | null>((done) => {
       const child = spawn(process.execPath, ['--input-type=module', '-e', script], { env: process.env, stdio: 'ignore' })
       child.on('close', done)
