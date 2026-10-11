@@ -1,0 +1,18 @@
+{
+  "name": "inkwell",
+  "description": "Living technical documentation from the terminal: pages, entry notes, backlog, diagrams, PDF and Confluence sync",
+  "owner": {
+    "name": "Jesus Enrique De Alba Gaytan",
+    "url": "https://github.com/KikeDeAlba"
+  },
+  "plugins": [
+    {
+      "name": "inkwell",
+      "description": "Write and keep technical documentation with the inkwell CLI: pages in git, entry notes, backlog, diagrams and Confluence",
+      "source": "./",
+      "version": "0.3.0",
+      "category": "productivity",
+      "tags": ["documentation", "markdown", "confluence", "diagrams"]
+    }
+  ]
+}

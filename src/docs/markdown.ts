@@ -128,6 +128,19 @@ export function parseDocument(text: string): ParsedDocument {
   }
 }
 
+export function stripFrontMatter(text: string): string {
+  return splitFrontMatter(text).rest.trim()
+}
+
+export function findSection(doc: ParsedDocument, name: string): DocSection | undefined {
+  const wanted = name.normalize('NFC').trim().toLowerCase()
+  return doc.sections.find((section) => section.heading.toLowerCase() === wanted)
+}
+
+export function sectionMarkdown(section: DocSection): string {
+  return section.body.length > 0 ? `## ${section.heading}\n\n${section.body}` : `## ${section.heading}`
+}
+
 export function renderDocument(doc: ParsedDocument): string {
   const parts: string[] = []
   if (doc.frontMatter.size > 0) parts.push(renderFrontMatter(doc.frontMatter))

@@ -11,11 +11,13 @@ import { inspectDocFile, type DocFileState } from '../../docs/inspect.ts'
 import { parseDocument, sectionStates, type DocSectionState } from '../../docs/markdown.ts'
 import { scanFiles, type ScanOptions } from '../../docs/search.ts'
 import { projectSlug } from '../../docs/slug.ts'
+import { resolveDocPath } from '../../docs/paths.ts'
 import { readRaw } from '../../docs/store.ts'
 import { NotFoundError, UsageError } from '../../errors.ts'
 import { entryDuration, findBita, type BitaEntry } from '../../integrations/bita.ts'
 import { BASE_OPTIONS, parseCommandArgs, readBoolean, readInteger, readString, type ParsedArgs } from '../args.ts'
 import { withLocalContext, type LocalContext } from '../context.ts'
+import { briefBody } from '../brief.ts'
 import { successEnvelope, writeJson, writeOut } from '../output.ts'
 
 const OPTIONS = {
@@ -39,6 +41,7 @@ const OPTIONS = {
   offset: { type: 'string' as const },
   'no-sections': { type: 'boolean' as const, default: false },
   'no-verify': { type: 'boolean' as const, default: false },
+  brief: { type: 'boolean' as const, default: false },
   'no-markdown': { type: 'boolean' as const, default: false },
   path: { type: 'string' as const },
   context: { type: 'string' as const },
@@ -435,6 +438,24 @@ async function runShow(ctx: LocalContext, args: ParsedArgs, json: boolean): Prom
     const notes = listNotesForEntry(ctx.db, entryId)
     primary = notes.find((note) => note.kind === 'note') ?? notes[0]
     entry = primary ? entryFromNote(primary) : await loadEntry(ctx, entryId)
+  }
+
+  const section = readString(args, 'section')
+  if (readBoolean(args, 'brief') || section !== undefined) {
+    const raw = primary === undefined ? null : await readRaw(resolveDocPath(ctx.docsRoot, primary.relPath))
+    const body = briefBody(raw, section)
+    const data = {
+      entryId: entry.id,
+      title: entry.description,
+      space: entry.projectName,
+      localDay: localDay(entry.startedAt, ctx.timezone),
+      running: entry.stoppedAt === null,
+      relPath: primary?.relPath ?? null,
+      ...body,
+    }
+    if (json) writeJson(successEnvelope('note show', data))
+    else writeOut(body.markdown ?? (primary === undefined ? `No note recorded for entry #${entry.id}.` : `The note was recorded at ${primary.relPath}, but the file is gone.`))
+    return 0
   }
 
   if (primary === undefined) {

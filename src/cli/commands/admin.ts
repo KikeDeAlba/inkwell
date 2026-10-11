@@ -6,7 +6,7 @@ import { gitAvailable } from '../../docs/git.ts'
 import { UsageError } from '../../errors.ts'
 import { bitaLocation, migrateFromBita, migrationStatus } from '../../migrate/from-bita.ts'
 import { importNotesFromBita } from '../../migrate/notes-from-bita.ts'
-import { integration, manifest, register, unregister } from '../../setup.ts'
+import { installAgents, manifest, register, uninstallAgents, unregister } from '../../setup.ts'
 import { normalizeSiteUrl } from '../../confluence/refs.ts'
 import { BASE_OPTIONS, parseCommandArgs, readBoolean, readString } from '../args.ts'
 import { withLocalContext } from '../context.ts'
@@ -40,7 +40,7 @@ export async function runSetup(argv: string[]): Promise<number> {
   const manifestPath = await register()
   const steps = readBoolean(args, 'no-agents')
     ? []
-    : await agents.installIntegration(integration({ drawio: !readBoolean(args, 'no-drawio') }), { agents: agentSelection(readString(args, 'agents')) })
+    : await installAgents(agentSelection(readString(args, 'agents')), { drawio: !readBoolean(args, 'no-drawio') })
   const chrome = await findChrome()
   const drawio = await findDrawio()
   const git = await gitAvailable()
@@ -67,7 +67,7 @@ export async function runSetup(argv: string[]): Promise<number> {
 
 export async function runUninstall(argv: string[]): Promise<number> {
   const args = parseCommandArgs(argv, {}, BASE_OPTIONS)
-  const steps = await agents.uninstallIntegration(integration(), { agents: 'all' })
+  const steps = await uninstallAgents()
   const removed = await unregister()
   const data = { unregistered: removed, steps }
   if (readBoolean(args, 'json')) writeJson(successEnvelope('uninstall', data))
