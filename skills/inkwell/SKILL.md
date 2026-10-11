@@ -1,18 +1,9 @@
 ---
 name: inkwell
 description: >-
-  Documenta el estado actual de un sistema con inkwell: páginas en markdown
-  organizadas por espacio y con historia en git, backlog de pendientes y
-  hallazgos, diagramas (mermaid y draw.io), exportación a PDF y sincronización
-  con Confluence. Úsala cuando haya que crear, leer o actualizar documentación
-  técnica, registrar algo que falta o que se descubrió, dibujar un diagrama,
-  publicar en Confluence o sacar un PDF. Frases que la disparan: "documenta
-  esto", "actualiza la página de", "crea una página para", "anota este
-  pendiente", "registra el hallazgo", "cierra APT-14", "haz un diagrama de",
-  "publícalo en Confluence", "sincroniza con Confluence", "exporta la página a
-  PDF", "qué dice la documentación de". También lleva la nota de cada entrada
-  de tiempo de bita mientras corre el cronómetro: "documenta lo que llevo",
-  "anota esto en la nota de la entrada", "qué dice la nota de la entrada 42".
+  Documentación técnica con inkwell: páginas en git, backlog, diagramas,
+  Confluence y notas de entradas de bita. Frases: "documenta esto", "anota este
+  pendiente", "haz un diagrama de", "publícalo en Confluence".
 ---
 
 # inkwell
