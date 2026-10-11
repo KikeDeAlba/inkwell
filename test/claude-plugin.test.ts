@@ -21,7 +21,7 @@ test('the plugin manifests are valid and match the package version', () => {
   const marketplace = JSON.parse(readFileSync(join(PACKAGE_ROOT, '.claude-plugin', 'marketplace.json'), 'utf8'))
   assert.equal(plugin.name, 'inkwell')
   assert.equal(plugin.version, VERSION)
-  assert.deepEqual(plugin.mcpServers.drawio, { command: 'npx', args: ['-y', '@drawio/mcp'] })
+  assert.equal(plugin.mcpServers, undefined)
   assert.equal(marketplace.name, CLAUDE_PLUGIN.marketplaceName)
   assert.equal(marketplace.plugins.length, 1)
   assert.equal(marketplace.plugins[0].name, CLAUDE_PLUGIN.plugin)
@@ -86,11 +86,13 @@ test('installAgents installs the Claude Code plugin, removes the legacy files an
   assert.ok(claudeCalls.includes('plugin marketplace add KikeDeAlba/inkwell'), claudeCalls.join('\n'))
   assert.ok(claudeCalls.includes('plugin marketplace update inkwell'))
   assert.ok(claudeCalls.includes('plugin install inkwell@inkwell --scope user'))
-  assert.ok(claudeCalls.includes('mcp remove --scope user drawio'))
+  assert.ok(claudeCalls.includes('mcp add --scope user drawio -- npx -y @drawio/mcp'), claudeCalls.join('\n'))
 
   assert.equal(existsSync(join(fake.homes.claude, 'skills', 'inkwell')), false)
   const settings = JSON.parse(readFileSync(join(fake.homes.claude, 'settings.json'), 'utf8'))
-  assert.deepEqual(settings.permissions.allow, ['Bash(ls:*)'])
+  assert.ok(settings.permissions.allow.includes('Bash(ls:*)'))
+  assert.ok(settings.permissions.allow.includes('Bash(inkwell tree:*)'))
+  assert.ok(settings.permissions.allow.includes('Bash(inkwell guide:*)'))
 
   const codexSkill = join(fake.homes.agentsSkills, 'inkwell')
   assert.ok(lstatSync(codexSkill))
@@ -105,6 +107,20 @@ test('installAgents leaves the legacy Claude files alone when the plugin could n
   const steps = await installAgents(['claude'], { ctx: fake.ctx, homes: fake.homes, exec: fake.exec, locate: async () => null })
   assert.equal(steps[0]?.state, 'unavailable')
   assert.ok(existsSync(join(fake.homes.claude, 'skills', 'inkwell')))
+})
+
+test('a failed marketplace update does not keep the legacy skill once the plugin is installed', async (t) => {
+  const fake = fakeAgents(t)
+  mkdirSync(join(fake.homes.claude, 'skills'), { recursive: true })
+  symlinkSync(SKILL_DIR, join(fake.homes.claude, 'skills', 'inkwell'), process.platform === 'win32' ? 'junction' : 'dir')
+  const exec = async (command: string, args: readonly string[]): Promise<string> => {
+    if (args.join(' ') === 'plugin marketplace update inkwell') throw new Error('network down')
+    return fake.exec(command, args)
+  }
+  const steps = await installAgents(['claude'], { ctx: fake.ctx, homes: fake.homes, exec, locate: fake.locate, drawio: false })
+  assert.ok(steps.some((step) => step.item === 'plugin inkwell@inkwell' && step.state === 'installed'))
+  assert.equal(existsSync(join(fake.homes.claude, 'skills', 'inkwell')), false)
+  assert.equal(fake.calls.some((call) => call.args[0] === 'mcp'), false, '--no-drawio registers no MCP and removes none')
 })
 
 test('uninstallAgents removes the Claude Code plugin', async (t) => {

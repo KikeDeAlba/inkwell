@@ -13,31 +13,6 @@ description: >-
   PDF", "qué dice la documentación de". También lleva la nota de cada entrada
   de tiempo de bita mientras corre el cronómetro: "documenta lo que llevo",
   "anota esto en la nota de la entrada", "qué dice la nota de la entrada 42".
-allowed-tools:
-  - Bash(inkwell tree:*)
-  - Bash(inkwell ls:*)
-  - Bash(inkwell show:*)
-  - Bash(inkwell search:*)
-  - Bash(inkwell guide:*)
-  - Bash(inkwell page ls:*)
-  - Bash(inkwell page show:*)
-  - Bash(inkwell page history:*)
-  - Bash(inkwell page diff:*)
-  - Bash(inkwell page asset path:*)
-  - Bash(inkwell backlog ls:*)
-  - Bash(inkwell diagrams ls:*)
-  - Bash(inkwell space ls:*)
-  - Bash(inkwell space show:*)
-  - Bash(inkwell branch ls:*)
-  - Bash(inkwell git status:*)
-  - Bash(inkwell confluence status:*)
-  - Bash(inkwell confluence conflict ls:*)
-  - Bash(inkwell note path:*)
-  - Bash(inkwell note show:*)
-  - Bash(inkwell note get:*)
-  - Bash(inkwell note ls:*)
-  - Bash(inkwell note search:*)
-  - Bash(inkwell note save:*)
 ---
 
 # inkwell
@@ -186,6 +161,8 @@ Usa Chrome (u otro Chromium) en modo headless. Sin él falla con
   falta, `inkwell space add`.
 - `SECTION_NOT_FOUND`: la sección pedida con `--section` no existe; la pista
   trae las que hay.
+- `DOC_MISSING`: el registro existe pero el archivo no; `page show <id>` (sin
+  `--brief`) trae el estado del archivo.
 - `BITA_MISSING`: bita no está instalado; las páginas siguen funcionando, solo
   faltan los datos de las entradas.
 - `ATL_MISSING`: ver [confluence.md](confluence.md).

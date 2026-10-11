@@ -332,7 +332,9 @@ async function runShow(ctx: PageContext, args: ParsedArgs, positional: string[],
   const revision = await revisionText(ctx, page, readString(args, 'rev'))
   const section = readString(args, 'section')
   if (readBoolean(args, 'brief') || section !== undefined) {
-    const body = briefBody(revision ? revision.markdown : raw, section)
+    const source = revision ? revision.markdown : raw
+    if (source === null) throw new NotFoundError(`The page file ${page.relPath} is missing.`, 'DOC_MISSING', `Run "inkwell page show ${page.id}" for the file state.`)
+    const body = briefBody(source, section)
     const data = {
       pageId: page.id,
       title: page.title,
@@ -342,7 +344,7 @@ async function runShow(ctx: PageContext, args: ParsedArgs, positional: string[],
       ...body,
     }
     if (json) writeJson(successEnvelope('page show', data))
-    else writeOut(body.markdown ?? `The page file ${page.relPath} is missing.`)
+    else writeOut(body.markdown ?? '')
     return 0
   }
   const parsed = raw === null ? null : parseDocument(raw)

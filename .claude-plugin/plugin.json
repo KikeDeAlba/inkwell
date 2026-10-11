@@ -9,11 +9,13 @@
   "homepage": "https://github.com/KikeDeAlba/inkwell",
   "repository": "https://github.com/KikeDeAlba/inkwell",
   "license": "MIT",
-  "keywords": ["documentation", "markdown", "git", "confluence", "diagrams", "mermaid", "drawio"],
-  "mcpServers": {
-    "drawio": {
-      "command": "npx",
-      "args": ["-y", "@drawio/mcp"]
-    }
-  }
+  "keywords": [
+    "documentation",
+    "markdown",
+    "git",
+    "confluence",
+    "diagrams",
+    "mermaid",
+    "drawio"
+  ]
 }

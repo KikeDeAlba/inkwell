@@ -109,8 +109,17 @@ async function selectedAgents(selection: AgentSelection, options: agents.Install
   return agents.detectAgents(ctx, agents.agentHomes(ctx, options.homes), options.locate)
 }
 
-function blocked(steps: readonly agents.Step[]): boolean {
-  return steps.some((step) => step.state === 'failed' || step.state === 'unavailable')
+function pluginReady(steps: readonly agents.Step[]): boolean {
+  const item = `plugin ${CLAUDE_PLUGIN.plugin}@${CLAUDE_PLUGIN.marketplaceName}`
+  return steps.some((step) => step.item === item && (step.state === 'installed' || step.state === 'present'))
+}
+
+export function claudeExtras(tools: agents.AgentIntegration): agents.AgentIntegration {
+  return { tool: tools.tool, version: tools.version, mcp: tools.mcp ?? [], ...(tools.claude ? { claude: tools.claude } : {}) }
+}
+
+export function claudeLegacy(tools: agents.AgentIntegration): agents.AgentIntegration {
+  return { tool: tools.tool, version: tools.version, skills: tools.skills ?? [] }
 }
 
 export async function installAgents(
@@ -124,7 +133,10 @@ export async function installAgents(
   if (wanted.includes('claude')) {
     const plugin = await agents.installClaudePlugin(CLAUDE_PLUGIN, install)
     steps.push(...plugin)
-    if (!blocked(plugin)) steps.push(...(await agents.removeLegacyClaude(tools, install)))
+    if (pluginReady(plugin)) {
+      steps.push(...(await agents.removeLegacyClaude(claudeLegacy(tools), install)))
+      steps.push(...(await agents.installIntegration(claudeExtras(tools), { ...install, agents: ['claude'] })))
+    }
   }
   const others = wanted.filter((agent) => agent !== 'claude')
   if (others.length > 0) steps.push(...(await agents.installIntegration(tools, { ...install, agents: others })))

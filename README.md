@@ -40,13 +40,14 @@ eventos de bita) y prepara a cada agente:
 
 | Agente | Qué recibe |
 |---|---|
-| **Claude Code** | El plugin `inkwell` de este mismo repositorio, que es su propio marketplace (`claude plugin marketplace add KikeDeAlba/inkwell` + `claude plugin install inkwell@inkwell`). Trae la skill y el MCP de draw.io. Si ya existía, se actualiza. Después se quitan los archivos sueltos que versiones anteriores dejaron en `~/.claude` (la skill enlazada, los permisos y el MCP de draw.io a nivel de usuario). |
-| **opencode, Codex y Gemini CLI** | La skill con sus archivos de apoyo y el MCP de draw.io (`--no-drawio` lo omite; en Claude Code el MCP viene con el plugin). |
+| **Claude Code** | El plugin `inkwell` de este mismo repositorio, que es su propio marketplace (`claude plugin marketplace add KikeDeAlba/inkwell` + `claude plugin install inkwell@inkwell`); si ya existía, se actualiza. Trae la skill. Con el plugin instalado se quita la skill suelta que versiones anteriores enlazaron en `~/.claude/skills`, y se mantienen en `~/.claude/settings.json` los permisos de solo lectura de `inkwell` y el MCP de draw.io a nivel de usuario (`--no-drawio` lo omite; si otra herramienta, como bita, ya lo registró, no se quita). |
+| **opencode, Codex y Gemini CLI** | La skill con sus archivos de apoyo y el MCP de draw.io (`--no-drawio` lo omite). |
 
 Si `claude` no está en el PATH, `setup` lo avisa con los comandos para
 instalar el plugin a mano y deja la instalación anterior como estaba.
 `inkwell uninstall` desinstala el plugin y revierte lo demás sin tocar las
-páginas.
+páginas (el marketplace `inkwell` queda agregado; se quita con
+`claude plugin marketplace remove inkwell`).
 
 ### La skill
 

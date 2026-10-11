@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { writeFileSync } from 'node:fs'
+import { rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { registerFakeBita, sandbox, type FakeEntry } from './helpers/sandbox.ts'
@@ -77,6 +77,16 @@ test('note show --brief on an entry without a note returns a null body', (t) => 
   assert.equal(data.entryId, 41)
   assert.equal(data.markdown, null)
   assert.equal(data.relPath, null)
+})
+
+test('--brief fails with DOC_MISSING when the recorded file is gone', (t) => {
+  const box = sandbox(t)
+  box.ok('space', 'add', 'Apartados', '--key', 'APT')
+  const page = box.ok('page', 'new', 'Arquitectura', '--space', 'APT').page
+  rmSync(join(box.env['INKWELL_DOCS_DIR'] as string, page.relPath))
+  const result = box.run(['page', 'show', String(page.pageId), '--brief'])
+  assert.notEqual(result.status, 0)
+  assert.equal(result.json.error.code, 'DOC_MISSING')
 })
 
 test('guide prints the shared writing rules', (t) => {

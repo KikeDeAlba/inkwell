@@ -442,7 +442,9 @@ async function runShow(ctx: LocalContext, args: ParsedArgs, json: boolean): Prom
 
   const section = readString(args, 'section')
   if (readBoolean(args, 'brief') || section !== undefined) {
-    const raw = primary === undefined ? null : await readRaw(resolveDocPath(ctx.docsRoot, primary.relPath))
+    const note = relPath !== undefined || primary?.kind === 'note' ? primary : undefined
+    const raw = note === undefined ? null : await readRaw(resolveDocPath(ctx.docsRoot, note.relPath))
+    if (note !== undefined && raw === null) throw new NotFoundError(`The note was recorded at ${note.relPath}, but the file is gone.`, 'DOC_MISSING', `Run "inkwell note show ${entry.id}" for the file state.`)
     const body = briefBody(raw, section)
     const data = {
       entryId: entry.id,
@@ -450,11 +452,11 @@ async function runShow(ctx: LocalContext, args: ParsedArgs, json: boolean): Prom
       space: entry.projectName,
       localDay: localDay(entry.startedAt, ctx.timezone),
       running: entry.stoppedAt === null,
-      relPath: primary?.relPath ?? null,
+      relPath: note?.relPath ?? null,
       ...body,
     }
     if (json) writeJson(successEnvelope('note show', data))
-    else writeOut(body.markdown ?? (primary === undefined ? `No note recorded for entry #${entry.id}.` : `The note was recorded at ${primary.relPath}, but the file is gone.`))
+    else writeOut(body.markdown ?? `No note recorded for entry #${entry.id}.`)
     return 0
   }
 
