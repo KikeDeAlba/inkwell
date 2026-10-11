@@ -31,14 +31,39 @@ ausente falla con un error claro (`BITA_MISSING`, `ATL_MISSING`,
 
 ```sh
 npm install -g @kikedealba/inkwell
-inkwell setup                          # registro de kit + skill para los agentes detectados
+inkwell setup                          # registro de kit + plugin de Claude Code + skill para los demás agentes
 inkwell setup --agents codex,gemini    # o solo algunos: claude, opencode, codex, gemini
 ```
 
 `setup` deja el manifiesto en el registro de kit (con la suscripción a los
-eventos de bita), instala la skill de documentación en Claude Code, opencode,
-Codex y Gemini CLI, y agrega el MCP de draw.io (`--no-drawio` lo omite).
-`inkwell uninstall` lo revierte sin tocar las páginas.
+eventos de bita) y prepara a cada agente:
+
+| Agente | Qué recibe |
+|---|---|
+| **Claude Code** | El plugin `inkwell` de este mismo repositorio, que es su propio marketplace (`claude plugin marketplace add KikeDeAlba/inkwell` + `claude plugin install inkwell@inkwell`); si ya existía, se actualiza. Trae la skill. Con el plugin instalado se quita la skill suelta que versiones anteriores enlazaron en `~/.claude/skills`, y se mantienen en `~/.claude/settings.json` los permisos de solo lectura de `inkwell` y el MCP de draw.io a nivel de usuario (`--no-drawio` lo omite; si otra herramienta, como bita, ya lo registró, no se quita). |
+| **opencode, Codex y Gemini CLI** | La skill con sus archivos de apoyo y el MCP de draw.io (`--no-drawio` lo omite). |
+
+Si `claude` no está en el PATH, `setup` lo avisa con los comandos para
+instalar el plugin a mano y deja la instalación anterior como estaba.
+`inkwell uninstall` desinstala el plugin y revierte lo demás sin tocar las
+páginas (el marketplace `inkwell` queda agregado; se quita con
+`claude plugin marketplace remove inkwell`).
+
+### La skill
+
+La skill (`skills/inkwell/SKILL.md`) se mantiene corta: solo se carga al
+invocarla, y los detalles viven en archivos de apoyo que se leen cuando la tarea
+los pide:
+
+| Archivo | Contenido |
+|---|---|
+| `writing.md` | Las reglas de redacción (frases prohibidas, «así no / así sí», tono). Es la fuente única: tally y las demás herramientas la enlazan. |
+| `entry-notes.md` | Cómo escribir y leer la nota de una entrada de bita. |
+| `diagrams.md` | mermaid contra draw.io y el flujo del MCP de draw.io. |
+| `confluence.md` | Cómo se publica y sincroniza con Confluence (siempre por atl). |
+
+`inkwell guide <writing|entry-notes|diagrams|confluence>` imprime cualquiera de
+ellos, para quien no tenga la skill a mano.
 
 ## Datos
 
@@ -57,6 +82,8 @@ inkwell space add "Apartados" --key APT --confluence https://acme.atlassian.net/
 inkwell page new "Arquitectura" --project APT
 inkwell page write 1 --md arquitectura.md
 inkwell page show 1
+inkwell page show 1 --brief --json            # solo el markdown y los identificadores
+inkwell page show 1 --section "Red" --json    # una sola sección
 inkwell tree
 inkwell search "waf" --project APT
 
@@ -77,6 +104,12 @@ inkwell export page 1 --out arquitectura.pdf
 inkwell confluence sync APT --dry-run
 ```
 
+`page show` y `note show` aceptan `--brief` (el markdown sin front matter, la
+lista de secciones y los identificadores mínimos, sin entradas, issues ni
+metadatos) y `--section <H2>` (una sola sección, con la misma forma corta). Son
+las formas que usan los agentes para no gastar contexto; una sección que no
+existe falla con `SECTION_NOT_FOUND` y la pista trae las que hay.
+
 `inkwell help` lista todos los comandos. Todos aceptan `--json` y responden con
 el sobre de kit (`{ schemaVersion, ok, command, generatedAt, data | error }`).
 `--project` (alias `--space`) acepta el nombre, la clave, el id del espacio o el
@@ -94,7 +127,7 @@ recap). La tabla `entry_notes` las indexa con la referencia `bita:entry:<id>`.
 | Comando | Qué hace |
 |---|---|
 | `note save <id> [--section H2] [--md FILE\|-]` | Crea la nota si falta y reemplaza la sección (por omisión, Qué se hizo). `--note-md` es sinónimo de `--md`; `--file`, `--command` y `--resource` llenan Tocado. |
-| `note show <id> \| --path <rel>` | La entrada y la nota con sus secciones, su front matter y su markdown. |
+| `note show <id> \| --path <rel> [--brief] [--section H2]` | La entrada y la nota con sus secciones, su front matter y su markdown; `--brief` y `--section`, la forma corta. |
 | `note get <id> [--raw]` o `note <id>` | La fila de la nota con su markdown. |
 | `note path <id> [--create]` | Dónde vive o viviría la nota. |
 | `note ls <id>` | Los archivos de esa entrada. |

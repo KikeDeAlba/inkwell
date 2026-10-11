@@ -1,0 +1,21 @@
+{
+  "name": "inkwell",
+  "description": "Living technical documentation through the inkwell CLI: page trees and entry notes in markdown with git history, a backlog, diagrams, PDF export and Confluence sync",
+  "version": "0.3.0",
+  "author": {
+    "name": "Jesus Enrique De Alba Gaytan",
+    "url": "https://github.com/KikeDeAlba"
+  },
+  "homepage": "https://github.com/KikeDeAlba/inkwell",
+  "repository": "https://github.com/KikeDeAlba/inkwell",
+  "license": "MIT",
+  "keywords": [
+    "documentation",
+    "markdown",
+    "git",
+    "confluence",
+    "diagrams",
+    "mermaid",
+    "drawio"
+  ]
+}
