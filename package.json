@@ -1,6 +1,6 @@
 {
   "name": "@kikedealba/inkwell",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Living technical documentation from the terminal: page trees and per-entry notes in markdown with git history, a backlog, diagrams, PDF export and Confluence sync.",
   "license": "MIT",
   "author": "Jesus Enrique De Alba Gaytan",
