@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { agents } from '@kikedealba/kit'
-import type { PlatformContext } from '@kikedealba/kit/platform'
+import { platformContext, type PlatformContext } from '@kikedealba/kit/platform'
 import { defineManifest, registerTool, stableBin, unregisterTool, type ToolManifest } from '@kikedealba/kit/registry'
 import { PACKAGE_ROOT, VERSION } from './version.ts'
 
@@ -54,7 +54,7 @@ export function integration(options: { drawio?: boolean } = {}): agents.AgentInt
     tool: 'inkwell',
     version: VERSION,
     description: 'Living technical documentation through inkwell',
-    skills: [{ name: 'inkwell', dir: path.join(PACKAGE_ROOT, 'skill') }],
+    skills: [{ name: 'inkwell', dir: path.join(PACKAGE_ROOT, 'skills', 'inkwell') }],
     mcp: options.drawio === false ? [] : [DRAWIO_MCP],
     claude: {
       permissions: {
@@ -63,6 +63,7 @@ export function integration(options: { drawio?: boolean } = {}): agents.AgentInt
           'Bash(inkwell ls:*)',
           'Bash(inkwell show:*)',
           'Bash(inkwell search:*)',
+          'Bash(inkwell guide:*)',
           'Bash(inkwell page ls:*)',
           'Bash(inkwell page show:*)',
           'Bash(inkwell page history:*)',
@@ -95,4 +96,55 @@ export async function register(ctx?: PlatformContext): Promise<string> {
 
 export async function unregister(): Promise<boolean> {
   return unregisterTool('inkwell')
+}
+
+export const CLAUDE_PLUGIN: agents.ClaudePluginSpec = { marketplace: 'KikeDeAlba/inkwell', marketplaceName: 'inkwell', plugin: 'inkwell' }
+
+export type AgentSelection = readonly agents.AgentName[] | 'detected' | 'all'
+
+async function selectedAgents(selection: AgentSelection, options: agents.InstallOptions): Promise<agents.AgentName[]> {
+  if (selection === 'all') return [...agents.AGENTS]
+  if (selection !== 'detected') return [...selection]
+  const ctx = options.ctx ?? platformContext()
+  return agents.detectAgents(ctx, agents.agentHomes(ctx, options.homes), options.locate)
+}
+
+function pluginReady(steps: readonly agents.Step[]): boolean {
+  const item = `plugin ${CLAUDE_PLUGIN.plugin}@${CLAUDE_PLUGIN.marketplaceName}`
+  return steps.some((step) => step.item === item && (step.state === 'installed' || step.state === 'present'))
+}
+
+export function claudeExtras(tools: agents.AgentIntegration): agents.AgentIntegration {
+  return { tool: tools.tool, version: tools.version, mcp: tools.mcp ?? [], ...(tools.claude ? { claude: tools.claude } : {}) }
+}
+
+export function claudeLegacy(tools: agents.AgentIntegration): agents.AgentIntegration {
+  return { tool: tools.tool, version: tools.version, skills: tools.skills ?? [] }
+}
+
+export async function installAgents(
+  selection: AgentSelection,
+  options: agents.InstallOptions & { drawio?: boolean } = {},
+): Promise<agents.Step[]> {
+  const { drawio, ...install } = options
+  const tools = integration(drawio === undefined ? {} : { drawio })
+  const wanted = await selectedAgents(selection, install)
+  const steps: agents.Step[] = []
+  if (wanted.includes('claude')) {
+    const plugin = await agents.installClaudePlugin(CLAUDE_PLUGIN, install)
+    steps.push(...plugin)
+    if (pluginReady(plugin)) {
+      steps.push(...(await agents.removeLegacyClaude(claudeLegacy(tools), install)))
+      steps.push(...(await agents.installIntegration(claudeExtras(tools), { ...install, agents: ['claude'] })))
+    }
+  }
+  const others = wanted.filter((agent) => agent !== 'claude')
+  if (others.length > 0) steps.push(...(await agents.installIntegration(tools, { ...install, agents: others })))
+  return steps
+}
+
+export async function uninstallAgents(options: agents.InstallOptions = {}): Promise<agents.Step[]> {
+  const steps = await agents.uninstallClaudePlugin(CLAUDE_PLUGIN, options)
+  steps.push(...(await agents.uninstallIntegration(integration(), { ...options, agents: 'all' })))
+  return steps
 }

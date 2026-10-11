@@ -64,6 +64,7 @@ import { findBita, requireEntry, snapshotOf, type BitaEntry } from '../../integr
 import { BASE_OPTIONS, parseCommandArgs, readBoolean, readInteger, readString, splitPositionals, type ParsedArgs } from '../args.ts'
 import { createLocalContext, type LocalContext } from '../context.ts'
 import { successEnvelope, writeErr, writeJson, writeOut } from '../output.ts'
+import { briefBody } from '../brief.ts'
 import { siteUrlFor, spaceIdArg, spaceNameOf } from '../spaces.ts'
 import { addRefToPage, refsOfPage, removeRefFromPage, REF_KINDS, type RefKind } from '../../db/page-refs.ts'
 import { classifyUrl } from '../../domain/refs.ts'
@@ -109,6 +110,7 @@ const OPTIONS = {
   recursive: { type: 'boolean' as const, default: false },
   'keep-doc': { type: 'boolean' as const, default: false },
   'no-markdown': { type: 'boolean' as const, default: false },
+  brief: { type: 'boolean' as const, default: false },
   create: { type: 'boolean' as const, default: false },
   tree: { type: 'boolean' as const, default: false },
   rev: { type: 'string' as const },
@@ -328,6 +330,23 @@ async function runShow(ctx: PageContext, args: ParsedArgs, positional: string[],
   const absolutePath = resolveDocPath(ctx.docsRoot, page.relPath)
   const raw = await readRaw(absolutePath)
   const revision = await revisionText(ctx, page, readString(args, 'rev'))
+  const section = readString(args, 'section')
+  if (readBoolean(args, 'brief') || section !== undefined) {
+    const source = revision ? revision.markdown : raw
+    if (source === null) throw new NotFoundError(`The page file ${page.relPath} is missing.`, 'DOC_MISSING', `Run "inkwell page show ${page.id}" for the file state.`)
+    const body = briefBody(source, section)
+    const data = {
+      pageId: page.id,
+      title: page.title,
+      space: projectNameOf(ctx, page.spaceId),
+      relPath: page.relPath,
+      ...(revision ? { rev: revision.sha } : {}),
+      ...body,
+    }
+    if (json) writeJson(successEnvelope('page show', data))
+    else writeOut(body.markdown ?? '')
+    return 0
+  }
   const parsed = raw === null ? null : parseDocument(raw)
   const headings: DocHeading[] = parsed === null ? [] : outline(parsed)
   const inspected = await inspectDocFile(ctx.docsRoot, page)

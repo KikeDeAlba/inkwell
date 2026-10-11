@@ -12,7 +12,7 @@ Pages:
   inkwell show <pageId> | --path <relPath>               same as page show
   inkwell search "<text>" [--project X] [--section H2]
   inkwell page ls [--project X] [--tree] [--entry ID]
-  inkwell page show <pageId> [--rev SHA] [--no-markdown]
+  inkwell page show <pageId> [--rev SHA] [--no-markdown] [--brief] [--section H2]
   inkwell page new "<title>" [--project X] [--parent ID] [--slug S] [--from-entry ID]
   inkwell page write <pageId> --md FILE | --body TEXT [--section "<H2>"]
   inkwell page rename <pageId> "<title>" | move <pageId> [--parent ID|-] [--project X]
@@ -25,12 +25,13 @@ Pages:
 
 Entry notes (one markdown note per bita entry):
   inkwell note path <entryId> [--create] | --draft
-  inkwell note show <entryId> | --path <relPath> [--no-markdown]
+  inkwell note show <entryId> | --path <relPath> [--no-markdown] [--brief] [--section H2]
   inkwell note get <entryId> [--raw]
   inkwell note save <entryId> [--section "<H2>"] [--md FILE|-] [--note-md FILE|-] [--file F --command C --resource R]
   inkwell note ls <entryId> | ls [today|yesterday|week|last-week|month|last-month] [--from D --to D] [--project X] [--limit N]
   inkwell note search "<text>" [--project X] [--section H2]
   --entry <id> works in place of the positional id.
+  --brief: markdown body plus ids only; --section: one H2 section, brief shape.
 
 Spaces:
   inkwell space ls [--all] | show <space>
@@ -61,11 +62,13 @@ Confluence (through atl):
 
 Setup:
   inkwell setup [--agents detected|all|claude,opencode,codex,gemini] [--no-agents] [--no-drawio]
+    (Claude Code gets the inkwell plugin; the other agents get the skill files)
   inkwell uninstall
   inkwell migrate --from-bita [--dry-run] [--bita-db PATH] [--bita-docs DIR] | migrate status
   inkwell migrate notes --from-bita [--dry-run] [--bita-db PATH] [--bita-docs DIR]
   inkwell config get | set <timezone|site> <value>
   inkwell capabilities [--json]
+  inkwell guide [writing|entry-notes|diagrams|confluence]   print a writing or workflow guide
 
 Every command takes --json. Data lives in INKWELL_DB_PATH and INKWELL_DOCS_DIR (default ${'~/.local/share/inkwell'}, %LOCALAPPDATA%\\inkwell on Windows).`
 
@@ -145,6 +148,8 @@ async function dispatch(argv: string[]): Promise<number> {
       return (await import('./commands/admin.ts')).runUninstall(rest)
     case 'config':
       return (await import('./commands/admin.ts')).runConfig(rest)
+    case 'guide':
+      return (await import('./commands/guide.ts')).runGuide(rest)
     case 'bita-hook':
       return (await import('./commands/hook.ts')).runBitaHook(rest)
     default:

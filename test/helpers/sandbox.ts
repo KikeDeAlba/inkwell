@@ -33,6 +33,7 @@ export function sandbox(t: { after: (fn: () => void) => void }, extra: NodeJS.Pr
     INKWELL_DOCS_DIR: join(dir, 'inkwell', 'docs'),
     ...extra,
   }
+  for (const key of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'GEMINI_CLI_HOME', 'KIT_AGENTS_HOME']) delete env[key]
   delete env['INKWELL_CHROME']
   delete env['INKWELL_DRAWIO']
   const run = (args: string[], input?: string) => {
