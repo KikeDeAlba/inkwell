@@ -10,6 +10,7 @@ import { bitaProjectRef, findSpaceByExternalRef, findSpaceById, findSpaceByKey, 
 import { SPACE_KEY_PATTERN, UNASSIGNED_KEY, ensureSpaceKey } from '../db/space-keys.ts'
 import { entryRef, issueRef } from '../db/page-links.ts'
 import { normalizeSiteUrl } from '../confluence/refs.ts'
+import { withEventBatch } from '../docs/events.ts'
 import { commitPaths, isDocsRepo, initDocsRepo, gitAvailable } from '../docs/git.ts'
 import { execGit } from '../docs/git-exec.ts'
 import { resolveDocPath } from '../docs/paths.ts'
@@ -318,7 +319,11 @@ export interface MigrateOptions {
   now: Date
 }
 
-export async function migrateFromBita(db: DatabaseSync, options: MigrateOptions): Promise<MigrationReport> {
+export function migrateFromBita(db: DatabaseSync, options: MigrateOptions): Promise<MigrationReport> {
+  return withEventBatch(() => runMigration(db, options))
+}
+
+async function runMigration(db: DatabaseSync, options: MigrateOptions): Promise<MigrationReport> {
   const { location, docsRoot, now } = options
   const status = migrationStatus(db)
   const empty: MigrationCounts = { spaces: 0, spacesReused: 0, pages: 0, entryLinks: 0, issueLinks: 0, refs: 0, backlog: 0, confluenceMaps: 0, noteFiles: 0 }

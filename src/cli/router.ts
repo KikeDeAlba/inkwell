@@ -20,7 +20,7 @@ Pages:
   inkwell page unlink <pageId> --entry IDS | --issue KEY
   inkwell page ref add|ls|rm <pageId> [--url U --title T --kind confluence|jira|drive|link]
   inkwell page asset path <pageId> <file> [--create]
-  inkwell page rm <pageId> [--recursive]
+  inkwell page rm <pageId> [--recursive] [--force]       delete the page and its files (.md, assets, child pages)
   inkwell page history <pageId> [--limit N] | diff <pageId> [SHA] | restore <pageId> <SHA>
 
 Entry notes (one markdown note per bita entry):
