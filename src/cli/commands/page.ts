@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, rm } from 'node:fs/promises'
+import { mkdir, readFile, rm, rmdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { assetRelPath } from '../../docs/diagrams.ts'
+import { assetRelPath, assetsRelDir } from '../../docs/diagrams.ts'
 import {
   ancestorsOf,
   childrenOf,
@@ -48,6 +48,7 @@ import { insertNewPage, newPageRelPath } from '../../docs/page-create.ts'
 import { recordPageDoc, movePageFile, pageCommitIntent, pageFilePaths } from '../../docs/page-record.ts'
 import {
   commitDocs,
+  docsStatus,
   pageHistory,
   pathAtRev,
   prepareDocsRepo,
@@ -60,7 +61,7 @@ import {
 import { resolveDocPath } from '../../docs/paths.ts'
 import { projectSlug, titleSlug } from '../../docs/slug.ts'
 import { readRaw } from '../../docs/store.ts'
-import { NotFoundError, UsageError } from '../../errors.ts'
+import { ConflictError, NotFoundError, UsageError } from '../../errors.ts'
 import { findBita, requireEntry, snapshotOf, type BitaEntry } from '../../integrations/bita.ts'
 import { BASE_OPTIONS, parseCommandArgs, readBoolean, readInteger, readString, splitPositionals, type ParsedArgs } from '../args.ts'
 import { createLocalContext, type LocalContext } from '../context.ts'
@@ -109,6 +110,7 @@ const OPTIONS = {
   site: { type: 'string' as const },
   'from-entry': { type: 'string' as const },
   recursive: { type: 'boolean' as const, default: false },
+  force: { type: 'boolean' as const, default: false },
   'keep-doc': { type: 'boolean' as const, default: false },
   'no-markdown': { type: 'boolean' as const, default: false },
   brief: { type: 'boolean' as const, default: false },
@@ -718,10 +720,24 @@ async function runRemove(ctx: PageContext, args: ParsedArgs, positional: string[
 
   const doomed = [...children.reverse(), page]
   await prepareDocsRepo(ctx.docsRoot)
-  const paths = doomed.flatMap((target) => pageFilePaths(target.relPath))
-  for (const relPath of paths) await rm(resolveDocPath(ctx.docsRoot, relPath), { recursive: true, force: true })
+  const paths = doomed.flatMap((target) => [target.relPath, assetsRelDir(target.relPath)])
+  const dirty = (await docsStatus(ctx.docsRoot)).filter((file) => paths.some((path) => file.path === path || file.path.startsWith(`${path}/`)))
+  if (dirty.length > 0 && !readBoolean(args, 'force')) {
+    throw new ConflictError(
+      `Page #${page.id} has uncommitted changes in ${dirty.map((file) => file.path).join(', ')}.`,
+      'PAGE_FILES_DIRTY',
+      'Commit them with "inkwell git commit" or pass --force to delete them anyway.',
+    )
+  }
+  const existing = paths.filter((relPath) => existsSync(resolveDocPath(ctx.docsRoot, relPath)))
+  for (const relPath of existing) await rm(resolveDocPath(ctx.docsRoot, relPath), { recursive: true, force: true })
+  await pruneEmptyDirs(ctx.docsRoot, dirname(page.relPath), doomed.map((target) => target.relPath))
   for (const target of doomed) deletePage(ctx.db, target.id)
   const sha = await commitDocs(ctx.docsRoot, paths, pageCommitIntent(page, page.relPath, 'remove', {}))
+  const untracked = new Set(dirty.filter((file) => file.status === 'untracked').map((file) => file.path))
+  if (sha === null && existing.some((relPath) => !untracked.has(relPath))) {
+    writeErr(`Warning: the files of page #${page.id} were deleted, but the deletion was not committed. Run "inkwell git commit" to record it.`)
+  }
 
   const data = { removed: doomed.map((target) => ({ pageId: target.id, title: target.title, relPath: target.relPath })), sha }
   if (json) {
@@ -730,6 +746,18 @@ async function runRemove(ctx: PageContext, args: ParsedArgs, positional: string[
   }
   writeOut(`Removed ${doomed.length} page${doomed.length === 1 ? '' : 's'} and ${doomed.length === 1 ? 'its file' : 'their files'}.`)
   return 0
+}
+
+async function pruneEmptyDirs(docsRoot: string, stop: string, pageRelPaths: readonly string[]): Promise<void> {
+  const under = (dir: string): boolean => dir !== '.' && (stop === '.' || dir.startsWith(`${stop}/`))
+  const dirs = new Set<string>()
+  for (const relPath of pageRelPaths) {
+    const own = relPath.slice(0, -3)
+    if (under(own)) dirs.add(own)
+    for (let dir = dirname(relPath); under(dir); dir = dirname(dir)) dirs.add(dir)
+  }
+  const deepestFirst = [...dirs].sort((a, b) => b.split('/').length - a.split('/').length)
+  for (const dir of deepestFirst) await rmdir(resolveDocPath(docsRoot, dir)).catch(() => undefined)
 }
 
 async function revisionText(
