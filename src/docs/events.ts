@@ -113,7 +113,7 @@ export function mergeChanges(current: readonly TrackedChange[], next: readonly T
     if (change.action === 'deleted') {
       if (existing?.action === 'moved' && existing.from !== undefined) {
         byPath.delete(change.relPath)
-        put({ action: 'deleted', relPath: existing.from })
+        put(byPath.has(existing.from) ? { action: 'written', relPath: existing.from } : { action: 'deleted', relPath: existing.from })
       } else if (existing?.created) byPath.delete(change.relPath)
       else put(change)
       continue
