@@ -13,6 +13,7 @@ import {
 } from '../db/pages.ts'
 import { findMapByPage, findMapByRemote, mapsOfSpace, saveMap, setMapState, type PageMapRow } from '../db/confluence-map.ts'
 import { findSpaceById, setSpaceLastSync } from '../db/spaces.ts'
+import { isAutodocPending } from '../db/autodoc-runs.ts'
 import { MAX_PAGE_DEPTH, pageRelPath } from '../docs/layout.ts'
 import { checksumOf, documentBody, parseDocument } from '../docs/markdown.ts'
 import { movePageFile, pageCommitIntent, pageFilePaths, recordPageDoc } from '../docs/page-record.ts'
@@ -53,6 +54,17 @@ export interface MappingStatus {
   confluenceTitle: string | null
   state: 'synced' | 'conflict'
   direction: SyncDirection
+}
+
+export const AUTODOC_PENDING_REASON = 'written by autodoc and waiting for "inkwell autodoc approve"'
+
+export function assertNotAutodocPending(db: DocsContext['db'], pageId: number): void {
+  if (!isAutodocPending(db, pageId)) return
+  throw new ConflictError(
+    `Page #${pageId} was written by autodoc and is waiting for approval, so it stays out of Confluence.`,
+    'AUTODOC_PENDING',
+    `Review it, then run "inkwell autodoc approve ${pageId}".`,
+  )
 }
 
 export const SYNC_MESSAGE = 'inkwell sync'
@@ -262,6 +274,10 @@ export async function syncProject(
     }
 
     if (localChanged) {
+      if (isAutodocPending(ctx.db, page.id)) {
+        report.skipped.push({ ...entry, reason: AUTODOC_PENDING_REASON })
+        continue
+      }
       if (!push) {
         report.skipped.push({ ...entry, reason: 'changed in inkwell, but push is off' })
         continue
@@ -307,6 +323,7 @@ async function bindRoot(
     (page) =>
       page.parentId === null &&
       page.status === 'active' &&
+      !isAutodocPending(ctx.db, page.id) &&
       titleKey(page.title) === wanted &&
       findMapByPage(ctx.db, page.id) === undefined,
   )
@@ -414,6 +431,7 @@ function unmappedSibling(
     (page) =>
       page.parentId === parentId &&
       page.status === 'active' &&
+      !isAutodocPending(ctx.db, page.id) &&
       titleKey(page.title) === wanted &&
       !claimed.has(page.id) &&
       findMapByPage(ctx.db, page.id) === undefined,
@@ -431,6 +449,7 @@ function unmappedNamesake(
   const matches = scopeOf(ctx, projectId, anchor).filter(
     (page) =>
       page.status === 'active' &&
+      !isAutodocPending(ctx.db, page.id) &&
       titleKey(page.title) === wanted &&
       !claimed.has(page.id) &&
       findMapByPage(ctx.db, page.id) === undefined,
@@ -467,6 +486,10 @@ async function pushUnmapped(
   for (const page of scopeOf(ctx, project.id, anchor)) {
     if (page.status !== 'active') continue
     if (claimed.has(page.id) || findMapByPage(ctx.db, page.id)) continue
+    if (isAutodocPending(ctx.db, page.id)) {
+      report.skipped.push(item({ id: page.id, title: page.title }, undefined, page.title, AUTODOC_PENDING_REASON))
+      continue
+    }
 
     let parentRemote: string | null = root.rootId
     if (page.parentId !== null && page.parentId !== anchor?.id) {
@@ -517,6 +540,7 @@ export async function resolveConflict(
     return item({ id: page.id, title: page.title }, remote.id, page.title, 'kept both as they are')
   }
 
+  if (keep === 'local') assertNotAutodocPending(ctx.db, page.id)
   if (hasDiagrams(body)) {
     throw new ConflictError(
       `${page.title} has diagrams, and keeping one side would ${keep === 'local' ? 'turn them into code in Confluence' : 'drop their sources in inkwell'}.`,

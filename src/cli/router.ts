@@ -47,8 +47,10 @@ Backlog:
 
 History and proposals:
   inkwell git init | status | commit [paths] [--message M] | normalize [--dry-run]
-  inkwell git propose <pageId> --branch B --reason "..." --md FILE|--body TEXT [--section H2] [--source meeting:<entryId>]
+  inkwell git propose <pageId> --branch B --reason "..." --md FILE|--body TEXT [--section H2] [--source meeting:<entryId>|session:<id>]
   inkwell branch ls | diff <branch> [--commit SHA] | apply <branch> --commit SHA | drop <branch>
+  inkwell autodoc ls                                     proposals and new pages written from Claude Code sessions
+  inkwell autodoc approve <pageId>                       let a page written by autodoc reach Confluence
 
 Diagrams and export:
   inkwell diagrams ls|render <pageId> [--force]
@@ -81,7 +83,7 @@ function commandName(argv: readonly string[]): string {
   }
   const first = words[0]
   if (first === undefined) return 'help'
-  if (['page', 'backlog', 'space', 'diagrams', 'branch', 'git', 'confluence', 'export', 'migrate', 'config', 'note'].includes(first) && words[1] !== undefined) {
+  if (['page', 'backlog', 'space', 'diagrams', 'branch', 'git', 'confluence', 'export', 'migrate', 'config', 'note', 'autodoc', 'hook'].includes(first) && words[1] !== undefined) {
     if (first === 'page' && words[1] === 'ref' && words[2] !== undefined) return `page ref ${words[2]}`
     if (first === 'confluence' && words[1] === 'conflict' && words[2] !== undefined) return `confluence conflict ${words[2]}`
     if (first === 'page' && words[1] === 'asset') return 'page asset path'
@@ -150,6 +152,12 @@ async function dispatch(argv: string[]): Promise<number> {
       return (await import('./commands/admin.ts')).runConfig(rest)
     case 'guide':
       return (await import('./commands/guide.ts')).runGuide(rest)
+    case 'hook':
+      return (await import('./commands/autodoc.ts')).runHook(rest)
+    case 'autodoc-run':
+      return (await import('./commands/autodoc.ts')).runAutodocRun(rest)
+    case 'autodoc':
+      return (await import('./commands/autodoc.ts')).runAutodocCommand(rest)
     case 'bita-hook':
       return (await import('./commands/hook.ts')).runBitaHook(rest)
     default:

@@ -38,6 +38,7 @@
     "dist",
     "assets",
     "skills",
+    "hooks",
     ".claude-plugin",
     "README.md",
     "LICENSE"

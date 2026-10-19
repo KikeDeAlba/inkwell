@@ -176,9 +176,23 @@ const ENTRY_NOTES: readonly string[] = [
   `CREATE INDEX entry_notes_space ON entry_notes (space_id)`,
 ]
 
+const AUTODOC: readonly string[] = [
+  `CREATE TABLE autodoc_runs (
+     session_id TEXT PRIMARY KEY,
+     lines INTEGER NOT NULL,
+     at TEXT NOT NULL
+   )`,
+  `CREATE TABLE autodoc_pending (
+     page_id INTEGER PRIMARY KEY REFERENCES pages (id) ON DELETE CASCADE,
+     session_id TEXT NOT NULL,
+     created_at TEXT NOT NULL
+   )`,
+]
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, statements: INITIAL_SCHEMA },
   { version: 2, statements: ENTRY_NOTES },
+  { version: 3, statements: AUTODOC },
 ]
 
 export const LATEST_VERSION = MIGRATIONS.reduce((highest, migration) => Math.max(highest, migration.version), 0)

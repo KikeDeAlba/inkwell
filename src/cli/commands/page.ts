@@ -7,7 +7,6 @@ import {
   childrenOf,
   deletePage,
   descendantsOf,
-  insertPage,
   listPages,
   movePage,
   renamePage,
@@ -39,12 +38,13 @@ import { formatDuration } from '../../domain/duration.ts'
 import { issueUrl } from '../../domain/jira.ts'
 import { localDay, toLocalIso } from '../../domain/timezone.ts'
 import { inspectDocFile } from '../../docs/inspect.ts'
-import { MAX_PAGE_DEPTH, pageRelPath } from '../../docs/layout.ts'
 import { outline, parseDocument, type DocHeading, type ParsedDocument } from '../../docs/markdown.ts'
 import { backlogHeadings } from '../../docs/backlog-extract.ts'
 import { listBacklogItems } from '../../db/backlog.ts'
 import { linkedSpaceFor } from '../../db/spaces.ts'
+import { clearAutodocPending } from '../../db/autodoc-runs.ts'
 import { PAGE_SPLIT_BYTES, PAGE_SPLIT_SECTIONS } from '../../config/constants.ts'
+import { insertNewPage, newPageRelPath } from '../../docs/page-create.ts'
 import { recordPageDoc, movePageFile, pageCommitIntent, pageFilePaths } from '../../docs/page-record.ts'
 import {
   commitDocs,
@@ -190,8 +190,7 @@ function projectNameOf(ctx: PageContext, spaceId: number | null): string | null 
 }
 
 function relPathFor(ctx: PageContext, spaceId: number | null, parent: DocPageRow | null, slug: string): string {
-  const ancestors = parent ? [...ancestorsOf(ctx.db, parent.id).map((row) => row.slug), parent.slug] : []
-  return pageRelPath({ projectName: projectNameOf(ctx, spaceId), ancestorSlugs: ancestors, slug })
+  return newPageRelPath(ctx.db, spaceId, parent, slug)
 }
 
 export interface PageView {
@@ -540,27 +539,8 @@ async function runNew(ctx: PageContext, args: ParsedArgs, positional: string[], 
         ? (linkedSpaceFor(ctx.db, fromEntry.projectId, fromEntry.projectName)?.id ?? null)
         : null
 
-  const depth = parent ? parent.depth + 1 : 0
-  if (depth > MAX_PAGE_DEPTH) {
-    throw new UsageError(`A page tree cannot go deeper than ${MAX_PAGE_DEPTH + 1} levels.`)
-  }
-
-  const wanted = readString(args, 'slug') ?? titleSlug(title)
-  const slug = uniqueSiblingSlug(ctx.db, projectId, parent?.id ?? null, titleSlug(wanted))
-  const relPath = relPathFor(ctx, projectId, parent, slug)
-
-  const id = insertPage(ctx.db, {
-    spaceId: projectId,
-    parentId: parent?.id ?? null,
-    slug,
-    title: title.trim(),
-    relPath,
-    depth,
-    source: 'cli',
-    now: ctx.now.toISOString(),
-  })
-
-  const page = requirePage(ctx.db, id)
+  const page = insertNewPage(ctx, { title, spaceId: projectId, parent, slug: readString(args, 'slug'), source: 'cli' })
+  const id = page.id
   if (fromEntry) linkEntryToPage(ctx.db, id, fromEntry.id, '', ctx.now.toISOString(), snapshotOf(fromEntry, ctx.now))
   const recorded = await recordPageDoc(ctx, page)
 
@@ -575,6 +555,7 @@ async function runWrite(ctx: PageContext, args: ParsedArgs, positional: string[]
   const heading = readString(args, 'section')
   const write = heading === undefined ? { body } : { section: { heading, body } }
   const recorded = await recordPageDoc(ctx, page, write)
+  if (heading === undefined) clearAutodocPending(ctx.db, page.id)
   const written = await readRaw(recorded.path)
   const warnings = written === null ? [] : pageWarnings(parseDocument(written), Buffer.byteLength(written))
 

@@ -7,7 +7,6 @@ import {
   commitDocs,
   commitInfo,
   commitPaths,
-  commitToBranch,
   docsStatus,
   docsSubject,
   dropBranch,
@@ -24,9 +23,9 @@ import {
   trailer,
   type DocsSource,
 } from '../../docs/git.ts'
-import { emptyDocument, parseDocument, renderDocument, upsertSection } from '../../docs/markdown.ts'
 import { normalizeDatabaseText, normalizeDocFiles } from '../../docs/normalize.ts'
 import { recordPageDoc } from '../../docs/page-record.ts'
+import { proposalSource, proposePage } from '../../docs/proposals.ts'
 import { NotFoundError, UsageError } from '../../errors.ts'
 import { BASE_OPTIONS, parseCommandArgs, readBoolean, readString, type ParsedArgs } from '../args.ts'
 import { createLocalContext, type LocalContext } from '../context.ts'
@@ -158,13 +157,6 @@ function pageArg(ctx: LocalContext, raw: string | undefined): DocPageRow {
   return requirePage(ctx.db, id)
 }
 
-function proposalSource(raw: string | undefined): { source: DocsSource; entryId: number | null } {
-  if (raw === undefined || raw === 'manual') return { source: 'manual', entryId: null }
-  const match = /^meeting(?::(\d+))?$/.exec(raw)
-  if (!match) throw new UsageError(`Unknown --source "${raw}". Use meeting:<entryId> or manual.`)
-  return { source: 'meeting', entryId: match[1] === undefined ? null : Number(match[1]) }
-}
-
 function sourceOf(value: string | undefined): DocsSource {
   return value !== undefined && (DOCS_SOURCES as readonly string[]).includes(value) ? (value as DocsSource) : 'manual'
 }
@@ -177,21 +169,6 @@ async function proposalBody(args: ParsedArgs): Promise<string> {
   return body
 }
 
-export function proposedContent(
-  base: string | null,
-  title: string,
-  change: { body: string; section?: string | undefined },
-): string {
-  let doc = base === null ? emptyDocument(new Map(), title) : parseDocument(base)
-  if (change.section !== undefined) {
-    doc = upsertSection(doc, change.section, change.body).doc
-  } else {
-    const replacement = parseDocument(change.body)
-    doc = { ...doc, preamble: replacement.preamble, sections: replacement.sections }
-  }
-  return renderDocument(doc)
-}
-
 async function runPropose(ctx: LocalContext, args: ParsedArgs, json: boolean): Promise<number> {
   const branch = readString(args, 'branch')
   if (branch === undefined) throw new UsageError('Pass --branch <name>.')
@@ -200,29 +177,9 @@ async function runPropose(ctx: LocalContext, args: ParsedArgs, json: boolean): P
   if (reason === undefined || reason.length === 0) throw new UsageError('Pass --reason "<why the page changes>".')
   const body = await proposalBody(args)
   const section = readString(args, 'section')
-  const { source, entryId } = proposalSource(readString(args, 'source'))
+  const origin = proposalSource(readString(args, 'source'))
 
-  await requireDocsRepo(ctx.docsRoot)
-  await commitDocs(ctx.docsRoot, [page.relPath], {
-    source: 'manual',
-    subject: docsSubject(page.relPath, 'record outside edits to', page.title),
-    pageId: page.id,
-    reason: 'external edit',
-  })
-
-  const { sha, base } = await commitToBranch(ctx.docsRoot, {
-    branch,
-    relPath: page.relPath,
-    build: (current) => proposedContent(current, page.title, { body, ...(section !== undefined ? { section } : {}) }),
-    intent: {
-      source,
-      subject: docsSubject(page.relPath, section === undefined ? 'propose a rewrite of' : `propose "${section}" for`, page.title),
-      pageId: page.id,
-      entryId,
-      reason,
-      ...(section !== undefined ? { trailers: { 'Inkwell-Section': section } } : {}),
-    },
-  })
+  const { sha, base } = await proposePage(ctx, page, { branch, body, section, reason, origin })
 
   const data = { branch, sha, pageId: page.id, path: page.relPath, base }
   if (json) {
@@ -324,7 +281,10 @@ async function runBranchApply(ctx: LocalContext, args: ParsedArgs, json: boolean
       action: 'apply a proposal to',
       reason: trailer(info.trailers, 'Reason') ?? null,
       entryId: trailer(info.trailers, 'Entry') === undefined ? null : Number(trailer(info.trailers, 'Entry')),
-      trailers: { 'Inkwell-Proposal': sha },
+      trailers: {
+        'Inkwell-Proposal': sha,
+        ...(trailer(info.trailers, 'Session') !== undefined ? { 'Inkwell-Session': trailer(info.trailers, 'Session') as string } : {}),
+      },
     },
   )
   const appliedSha = recorded.sha ?? (await headSha(ctx.docsRoot))

@@ -144,6 +144,71 @@ fin y la duración, `merge` pasa las secciones de las entradas absorbidas a la
 que sobrevive y borra las suyas, y `cancel` y `delete` la borran. Cada cambio es
 un commit.
 
+## Autodoc
+
+Al cerrar (o compactar) una sesión de Claude Code, el plugin corre
+`inkwell hook session-end`, que lanza en segundo plano una revisión de la
+conversación con un modelo pequeño (`haiku` por omisión) y sale de inmediato.
+Esa revisión:
+
+- Ubica el espacio de la sesión por el repositorio donde se trabajó: primero
+  `bita repo which` (el proyecto de bita enlazado al espacio) y, si no, el
+  repositorio de las páginas que ya existen. Si no hay espacio, no hace nada:
+  nunca crea espacios.
+- Toma solo lo nuevo desde la última revisión de esa sesión (los turnos de
+  texto del usuario y del asistente) y se queda con el conocimiento durable del
+  sistema; lo efímero se descarta.
+- Un cambio a una página existente **nunca toca la página**: queda como
+  propuesta en una rama `autodoc/<sesión>-<página>`.
+- Una página nueva se crea directamente, colgada del padre que le corresponde
+  en el árbol del espacio (en la raíz solo si el espacio está vacío), sin
+  títulos repetidos ni secciones de backlog. Queda **pendiente de aprobar**: no
+  sube a Confluence hasta `inkwell autodoc approve <pageId>` o hasta que una
+  persona la reescriba completa con `page write` (una escritura por
+  `--section` no basta).
+- Antes de llamar al modelo reemplaza por `[REDACTED]` lo que parezca un
+  secreto (llaves, tokens, contraseñas, credenciales en URLs, tarjetas), y
+  descarta toda acción que todavía traiga uno, o que traiga imágenes, HTML o
+  enlaces que no sean `http(s)`, relativos o `#ancla`.
+- El modelo corre sin herramientas (`--tools ""`), en una carpeta temporal
+  vacía, con un entorno mínimo y `CLAUDE_CODE_SAFE_MODE=1`. Recibe el árbol del
+  espacio y el contenido (recortado) de las páginas que tienen que ver con la
+  sesión. Un cambio a una página puede reescribir una sección, agregar una
+  nueva después de otra, o reescribir la página completa.
+
+No escribe nada en bita ni en las notas por entrada. Cada revisión deja una
+línea, solo con metadatos y códigos, en `${XDG_DATA_HOME:-~/.local/share}/inkwell/autodoc.log`
+(`%LOCALAPPDATA%\inkwell\autodoc.log` en Windows).
+
+Las propuestas se revisan y se aceptan así:
+
+```sh
+inkwell autodoc ls                                  # ramas autodoc/* pendientes y páginas nuevas por aprobar
+inkwell autodoc approve 12                          # la página nueva 12 ya puede subir a Confluence
+inkwell branch diff autodoc/abcdef12-4              # qué cambiaría
+inkwell branch apply autodoc/abcdef12-4 --commit <sha>
+inkwell branch drop autodoc/abcdef12-4              # descartarla
+```
+
+Se configura en `~/.config/inkwell/config.json` (`%APPDATA%\inkwell\config.json`
+en Windows); estos son los valores por omisión:
+
+```json
+{
+  "autodoc": {
+    "enabled": true,
+    "model": "haiku",
+    "maxChars": 40000,
+    "minChars": 600,
+    "maxActions": 5,
+    "timeoutSeconds": 240
+  }
+}
+```
+
+Para apagarlo, `"enabled": false`, o `INKWELL_NO_AUTODOC=1` en el entorno de
+Claude Code. `INKWELL_CLAUDE_BIN` cambia el binario de `claude` que usa.
+
 ## Venir desde bita
 
 Hasta la versión 0.18, bita guardaba la documentación junto con el tiempo.

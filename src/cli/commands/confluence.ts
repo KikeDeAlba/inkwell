@@ -6,7 +6,7 @@ import { successEnvelope, writeJson, writeOut } from '../output.ts'
 import { adfImage, displaySize, pngSize, storageImage } from '../../confluence/fragments.ts'
 import { AtlConfluence, type AttachmentInfo, type ConfluenceGateway } from '../../confluence/gateway.ts'
 import { normalizeSiteUrl } from '../../confluence/refs.ts'
-import { resolveConflict, syncProject, syncStatus, type ProjectSyncReport } from '../../confluence/sync.ts'
+import { assertNotAutodocPending, resolveConflict, syncProject, syncStatus, type ProjectSyncReport } from '../../confluence/sync.ts'
 import { mapsOfSpace } from '../../db/confluence-map.ts'
 import { addRefToPage } from '../../db/page-refs.ts'
 import { findPage } from '../../db/pages.ts'
@@ -162,6 +162,7 @@ async function runPublishDiagrams(ctx: LocalContext, args: ParsedArgs, json: boo
   const target = readString(args, 'to')
   if (!Number.isInteger(localId) || localId <= 0 || target === undefined || !/^\d+$/.test(target)) throw new UsageError(usage)
 
+  assertNotAutodocPending(ctx.db, localId)
   const local = findPage(ctx.db, localId)
   const owner = local?.spaceId ? findSpaceById(ctx.db, local.spaceId) : undefined
   const { diagrams, results } = await renderPageDiagrams(ctx, localId, { force: readBoolean(args, 'force') })
