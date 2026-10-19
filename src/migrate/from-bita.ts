@@ -10,6 +10,7 @@ import { bitaProjectRef, findSpaceByExternalRef, findSpaceById, findSpaceByKey, 
 import { SPACE_KEY_PATTERN, UNASSIGNED_KEY, ensureSpaceKey } from '../db/space-keys.ts'
 import { entryRef, issueRef } from '../db/page-links.ts'
 import { normalizeSiteUrl } from '../confluence/refs.ts'
+import { withEventBatch } from '../docs/events.ts'
 import { commitPaths, isDocsRepo, initDocsRepo, gitAvailable } from '../docs/git.ts'
 import { execGit } from '../docs/git-exec.ts'
 import { resolveDocPath } from '../docs/paths.ts'
@@ -307,7 +308,9 @@ async function copyDocs(source: string, target: string, snapshot: BitaSnapshot):
     const state = await initDocsRepo(target)
     return { source: mode, commit: state.head }
   }
-  const commit = await commitPaths(target, ['.'], { source: 'import', subject: MIGRATION_COMMIT_SUBJECT, reason: 'bita migration' })
+  const commit = await withEventBatch(() =>
+    commitPaths(target, ['.'], { source: 'import', subject: MIGRATION_COMMIT_SUBJECT, reason: 'bita migration' }),
+  )
   return { source: mode, commit }
 }
 
