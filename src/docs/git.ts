@@ -9,7 +9,7 @@ import { execGit, type GitResult } from './git-exec.ts'
 import { relativeDocPath } from './paths.ts'
 import { NO_PROJECT_SLUG } from './slug.ts'
 
-export const DOCS_SOURCES = ['manual', 'meeting', 'confluence-pull', 'restore', 'note', 'import'] as const
+export const DOCS_SOURCES = ['manual', 'meeting', 'confluence-pull', 'restore', 'note', 'import', 'session'] as const
 export type DocsSource = (typeof DOCS_SOURCES)[number]
 export type RevisionSource = DocsSource | 'unknown'
 
@@ -580,14 +580,22 @@ export interface BranchWrite {
   relPath: string
   build: (base: string | null) => string
   intent: CommitIntent
+  fresh?: boolean | undefined
 }
 
-export async function commitToBranch(root: string, write: BranchWrite): Promise<{ sha: string; base: string }> {
+async function freeBranchName(root: string, wanted: string): Promise<string> {
+  let name = wanted
+  for (let suffix = 2; (await branchTip(root, name)) !== null; suffix += 1) name = `${wanted}-${suffix}`
+  return name
+}
+
+export async function commitToBranch(root: string, write: BranchWrite): Promise<{ sha: string; base: string; branch: string }> {
   await assertBranchName(root, write.branch)
   return withDocsGitLock(root, async () => {
     const main = await headSha(root)
     if (main === null) throw new NotFoundError('The docs have no history yet.', 'REV_NOT_FOUND', 'Run "inkwell git init".')
-    const tip = await branchTip(root, write.branch)
+    const branch = write.fresh === true ? await freeBranchName(root, write.branch) : write.branch
+    const tip = await branchTip(root, branch)
     const parent = tip ?? main
     const base = (await readBlob(root, parent, write.relPath)) ?? (await readBlob(root, main, write.relPath))
     const content = write.build(base)
@@ -606,8 +614,8 @@ export async function commitToBranch(root: string, write: BranchWrite): Promise<
           input: commitMessage(write.intent.subject, write.intent),
         })
       ).trim()
-      await git(root, ['update-ref', `refs/heads/${write.branch}`, sha, tip ?? ZERO_SHA])
-      return { sha, base: parent }
+      await git(root, ['update-ref', `refs/heads/${branch}`, sha, tip ?? ZERO_SHA])
+      return { sha, base: parent, branch }
     } finally {
       await rm(index, { force: true }).catch(() => undefined)
     }
@@ -648,6 +656,12 @@ export async function listBranches(root: string): Promise<BranchSummary[]> {
     branches.push({ name, head: head.trim(), commits: commits.map(({ sha, subject, pageId }) => ({ sha, subject, pageId })) })
   }
   return branches
+}
+
+export async function appliedProposals(root: string): Promise<Set<string>> {
+  if (!isDocsRepo(root) || (await headSha(root)) === null) return new Set()
+  const out = await git(root, ['log', `--format=%(trailers:key=${TRAILER_PREFIX}Proposal,valueonly,unfold)`, `refs/heads/${MAIN_BRANCH}`])
+  return new Set(out.split('\n').map((line) => line.trim()).filter((line) => line.length > 0))
 }
 
 export async function assertOnBranch(root: string, branch: string, sha: string): Promise<void> {

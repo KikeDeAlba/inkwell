@@ -15,6 +15,7 @@ export const CAPABILITIES = [
   'docs.export.pdf',
   'docs.confluence.sync',
   'docs.entry-notes',
+  'docs.autodoc',
 ]
 
 export const SUBSCRIBED_EVENTS = ['delete', 'merge', 'cancel', 'start', 'stop', 'amend']

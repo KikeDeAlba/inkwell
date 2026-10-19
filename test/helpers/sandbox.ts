@@ -56,7 +56,7 @@ export function sandbox(t: { after: (fn: () => void) => void }, extra: NodeJS.Pr
       if (result.status !== 0 || !result.json?.ok) throw new Error(`inkwell ${args.join(' ')} failed (${result.status}): ${result.stdout} ${result.stderr}`)
       return result.json.data
     },
-    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+    cleanup: () => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }),
   }
   t.after(() => box.cleanup())
   return box

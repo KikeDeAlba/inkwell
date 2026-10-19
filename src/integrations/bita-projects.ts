@@ -103,3 +103,35 @@ export function setBitaProjectLookup(next: BitaProjectLookup): () => void {
     lookup = previous
   }
 }
+
+export interface BitaRepoProject {
+  slug: string
+  projectId: number
+  projectName: string | null
+}
+
+export type BitaRepoLookup = (cwd: string) => BitaRepoProject | null
+
+export const cliBitaRepoLookup: BitaRepoLookup = (cwd) => {
+  if (process.env['INKWELL_NO_BITA']) return null
+  const [command, ...prefix] = bitaBin() ?? []
+  if (!command) return null
+  try {
+    const stdout = execFileSync(command, [...prefix, 'repo', 'which', '--json'], {
+      cwd,
+      encoding: 'utf8',
+      timeout: 15_000,
+      env: { ...process.env, BITA_NO_DELEGATE: '1', BITA_NO_HOOKS: '1', KIT_NO_EVENTS: '1' },
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+    })
+    const envelope = parseEnvelope(stdout)
+    if (!envelope?.ok) return null
+    const data = record(envelope.data)
+    const projectId = data['projectId']
+    if (typeof projectId !== 'number' || !Number.isInteger(projectId)) return null
+    return { slug: text(data['slug']) ?? '', projectId, projectName: text(data['projectName']) }
+  } catch {
+    return null
+  }
+}
