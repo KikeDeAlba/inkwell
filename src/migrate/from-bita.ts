@@ -308,9 +308,7 @@ async function copyDocs(source: string, target: string, snapshot: BitaSnapshot):
     const state = await initDocsRepo(target)
     return { source: mode, commit: state.head }
   }
-  const commit = await withEventBatch(() =>
-    commitPaths(target, ['.'], { source: 'import', subject: MIGRATION_COMMIT_SUBJECT, reason: 'bita migration' }),
-  )
+  const commit = await commitPaths(target, ['.'], { source: 'import', subject: MIGRATION_COMMIT_SUBJECT, reason: 'bita migration' })
   return { source: mode, commit }
 }
 
@@ -321,7 +319,11 @@ export interface MigrateOptions {
   now: Date
 }
 
-export async function migrateFromBita(db: DatabaseSync, options: MigrateOptions): Promise<MigrationReport> {
+export function migrateFromBita(db: DatabaseSync, options: MigrateOptions): Promise<MigrationReport> {
+  return withEventBatch(() => runMigration(db, options))
+}
+
+async function runMigration(db: DatabaseSync, options: MigrateOptions): Promise<MigrationReport> {
   const { location, docsRoot, now } = options
   const status = migrationStatus(db)
   const empty: MigrationCounts = { spaces: 0, spacesReused: 0, pages: 0, entryLinks: 0, issueLinks: 0, refs: 0, backlog: 0, confluenceMaps: 0, noteFiles: 0 }
