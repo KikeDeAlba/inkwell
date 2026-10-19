@@ -4,6 +4,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
+import { openMemoryDatabase } from '../src/db/open.ts'
+import { listPages } from '../src/db/pages.ts'
+import { findNoteByRelPath } from '../src/db/entry-notes.ts'
+import { setDocsEventSink, type DocsChangedEvent } from '../src/docs/events.ts'
+import { migrateFromBita } from '../src/migrate/from-bita.ts'
 import { sandbox, type Sandbox } from './helpers/sandbox.ts'
 
 const NOW = '2026-10-01T12:00:00.000Z'
@@ -150,4 +155,29 @@ test('a missing bita database is a clear error', (t) => {
   const box = sandbox(t)
   const missing = box.run(['migrate', '--from-bita', '--bita-db', join(box.dir, 'nope.db')])
   assert.equal(missing.json.error.code, 'BITA_DB_NOT_FOUND')
+})
+
+test('the whole migration, notes included, emits a single docs.changed once the data is in place', async (t) => {
+  const box = sandbox(t)
+  const bita = bitaFixture(box)
+  const db = openMemoryDatabase()
+  const docsRoot = join(box.dir, 'migrated-docs')
+  const seen: { event: DocsChangedEvent; pages: number; notes: boolean }[] = []
+  const previous = setDocsEventSink(async (event) => {
+    seen.push({ event, pages: listPages(db).length, notes: findNoteByRelPath(db, 'apartados/2026/09/20-10-ajustar-waf.md') !== undefined })
+  })
+  t.after(() => setDocsEventSink(previous))
+
+  const report = await migrateFromBita(db, {
+    dryRun: false,
+    location: { database: bita.db, docs: bita.docs, config: join(box.dir, 'bita', 'config.json') },
+    docsRoot,
+    now: new Date(NOW),
+  })
+  assert.equal(report.notes?.counts.imported, 1)
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0]?.pages, 2)
+  assert.equal(seen[0]?.notes, true)
+  assert.equal(seen[0]?.event.commit, report.docs.commit)
+  assert.deepEqual(seen[0]?.event.changes, [{ action: 'written', relPath: 'apartados/arquitectura.md' }])
 })

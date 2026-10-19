@@ -17,6 +17,7 @@ import { isAutodocPending } from '../db/autodoc-runs.ts'
 import { MAX_PAGE_DEPTH, pageRelPath } from '../docs/layout.ts'
 import { checksumOf, documentBody, parseDocument } from '../docs/markdown.ts'
 import { movePageFile, pageCommitIntent, pageFilePaths, recordPageDoc } from '../docs/page-record.ts'
+import { withEventBatch } from '../docs/events.ts'
 import { commitDocs } from '../docs/git.ts'
 import { resolveDocPath } from '../docs/paths.ts'
 import type { DocsContext } from '../docs/context.ts'
@@ -216,6 +217,16 @@ export async function resolveRoot(client: ConfluenceGateway, project: SpaceRow, 
 }
 
 export async function syncProject(
+  ctx: DocsContext,
+  client: ConfluenceGateway,
+  project: SpaceRow,
+  site: string,
+  options: SyncOptions,
+): Promise<ProjectSyncReport> {
+  return withEventBatch(() => syncProjectPages(ctx, client, project, site, options))
+}
+
+async function syncProjectPages(
   ctx: DocsContext,
   client: ConfluenceGateway,
   project: SpaceRow,
@@ -524,6 +535,15 @@ async function pushUnmapped(
 }
 
 export async function resolveConflict(
+  ctx: DocsContext,
+  client: ConfluenceGateway,
+  pageId: number,
+  keep: 'local' | 'remote' | 'both',
+): Promise<SyncItem> {
+  return withEventBatch(() => resolvePageConflict(ctx, client, pageId, keep))
+}
+
+async function resolvePageConflict(
   ctx: DocsContext,
   client: ConfluenceGateway,
   pageId: number,

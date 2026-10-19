@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { requirePage, type DocPageRow } from '../../db/pages.ts'
+import { withEventBatch } from '../../docs/events.ts'
 import {
   assertOnBranch,
   branchCommits,
@@ -132,7 +133,9 @@ async function runNormalize(ctx: LocalContext, args: ParsedArgs, json: boolean):
   const sha =
     dryRun || files.length === 0
       ? null
-      : await commitDocs(ctx.docsRoot, files, { source: 'manual', subject: 'docs: normalize text to nfc', reason: 'unicode normalization' })
+      : await withEventBatch(() =>
+          commitDocs(ctx.docsRoot, files, { source: 'manual', subject: 'docs: normalize text to nfc', reason: 'unicode normalization' }),
+        )
   const data = { dryRun, sha, files, columns }
 
   if (json) {

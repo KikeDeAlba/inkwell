@@ -3,6 +3,7 @@ import path from 'node:path'
 import { agents } from '@kikedealba/kit'
 import { platformContext, type PlatformContext } from '@kikedealba/kit/platform'
 import { defineManifest, registerTool, stableBin, unregisterTool, type ToolManifest } from '@kikedealba/kit/registry'
+import { DOCS_CHANGED_EVENT } from './docs/events.ts'
 import { PACKAGE_ROOT, VERSION } from './version.ts'
 
 export const CAPABILITIES = [
@@ -17,6 +18,8 @@ export const CAPABILITIES = [
   'docs.entry-notes',
   'docs.autodoc',
 ]
+
+export const EMITTED_EVENTS = [DOCS_CHANGED_EVENT]
 
 export const SUBSCRIBED_EVENTS = ['delete', 'merge', 'cancel', 'start', 'stop', 'amend']
 
@@ -42,6 +45,7 @@ export function manifest(bin: readonly string[] = binCommand()): ToolManifest {
     description: 'Living technical documentation: pages, entry notes, backlog, history, diagrams, PDF and Confluence sync',
     bin: [...bin],
     capabilities: CAPABILITIES,
+    emits: EMITTED_EVENTS,
     subscribes: [{ tool: 'bita', events: SUBSCRIBED_EVENTS, command: [...bin, 'bita-hook'] }],
     homepage: 'https://github.com/KikeDeAlba/inkwell',
     install: INSTALL_HINT,

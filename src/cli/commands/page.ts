@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, rmdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { assetRelPath } from '../../docs/diagrams.ts'
+import { assetRelPath, assetsRelDir } from '../../docs/diagrams.ts'
 import {
   ancestorsOf,
   childrenOf,
@@ -41,6 +41,7 @@ import { inspectDocFile } from '../../docs/inspect.ts'
 import { outline, parseDocument, type DocHeading, type ParsedDocument } from '../../docs/markdown.ts'
 import { backlogHeadings } from '../../docs/backlog-extract.ts'
 import { listBacklogItems } from '../../db/backlog.ts'
+import { findNoteByRelPath } from '../../db/entry-notes.ts'
 import { linkedSpaceFor } from '../../db/spaces.ts'
 import { clearAutodocPending } from '../../db/autodoc-runs.ts'
 import { PAGE_SPLIT_BYTES, PAGE_SPLIT_SECTIONS } from '../../config/constants.ts'
@@ -48,8 +49,13 @@ import { insertNewPage, newPageRelPath } from '../../docs/page-create.ts'
 import { recordPageDoc, movePageFile, pageCommitIntent, pageFilePaths } from '../../docs/page-record.ts'
 import {
   commitDocs,
+  docsStatus,
+  gitAvailable,
+  isDocsRepo,
   pageHistory,
+  trackedUnder,
   pathAtRev,
+  prepareDocsRepo,
   readBlob,
   requireDocsRepo,
   resolveRev,
@@ -59,7 +65,7 @@ import {
 import { resolveDocPath } from '../../docs/paths.ts'
 import { projectSlug, titleSlug } from '../../docs/slug.ts'
 import { readRaw } from '../../docs/store.ts'
-import { NotFoundError, UsageError } from '../../errors.ts'
+import { ConflictError, NotFoundError, UsageError } from '../../errors.ts'
 import { findBita, requireEntry, snapshotOf, type BitaEntry } from '../../integrations/bita.ts'
 import { BASE_OPTIONS, parseCommandArgs, readBoolean, readInteger, readString, splitPositionals, type ParsedArgs } from '../args.ts'
 import { createLocalContext, type LocalContext } from '../context.ts'
@@ -108,6 +114,7 @@ const OPTIONS = {
   site: { type: 'string' as const },
   'from-entry': { type: 'string' as const },
   recursive: { type: 'boolean' as const, default: false },
+  force: { type: 'boolean' as const, default: false },
   'keep-doc': { type: 'boolean' as const, default: false },
   'no-markdown': { type: 'boolean' as const, default: false },
   brief: { type: 'boolean' as const, default: false },
@@ -716,15 +723,57 @@ async function runRemove(ctx: PageContext, args: ParsedArgs, positional: string[
   }
 
   const doomed = [...children.reverse(), page]
+  const force = readBoolean(args, 'force')
+  await prepareDocsRepo(ctx.docsRoot)
+  const versioned = isDocsRepo(ctx.docsRoot) && (await gitAvailable())
+  if (!versioned && !force) {
+    throw new ConflictError(
+      `${ctx.docsRoot} has no usable git history, so the files of page #${page.id} could not be recovered after deleting them.`,
+      'DOCS_REPO_UNAVAILABLE',
+      'Install git or run "inkwell git init", or pass --force to delete them without history.',
+    )
+  }
+  const skipped = doomed.map((target) => target.relPath).filter((relPath) => findNoteByRelPath(ctx.db, relPath) !== undefined)
+  const paths = doomed.filter((target) => !skipped.includes(target.relPath)).flatMap((target) => [target.relPath, assetsRelDir(target.relPath)])
+  const covers = (path: string, file: string): boolean => file === path || file.startsWith(`${path}/`)
+  const dirty = versioned ? (await docsStatus(ctx.docsRoot)).filter((file) => paths.some((path) => covers(path, file.path))) : []
+  if (dirty.length > 0 && !force) {
+    throw new ConflictError(
+      `Page #${page.id} has uncommitted changes in ${dirty.map((file) => file.path).join(', ')}.`,
+      'PAGE_FILES_DIRTY',
+      'Commit them with "inkwell git commit" or pass --force to delete them anyway.',
+    )
+  }
+  for (const relPath of skipped) writeErr(`Warning: ${relPath} is an entry note, so page rm left it in place.`)
+  const existing = paths.filter((relPath) => existsSync(resolveDocPath(ctx.docsRoot, relPath)))
+  const tracked = versioned ? await trackedUnder(ctx.docsRoot, existing) : []
+  for (const relPath of existing) await rm(resolveDocPath(ctx.docsRoot, relPath), { recursive: true, force: true })
+  await pruneEmptyDirs(ctx.docsRoot, dirname(page.relPath), doomed.map((target) => target.relPath))
   for (const target of doomed) deletePage(ctx.db, target.id)
+  const sha = versioned ? await commitDocs(ctx.docsRoot, paths, pageCommitIntent(page, page.relPath, 'remove', {})) : null
+  if (versioned && sha === null && tracked.length > 0) {
+    writeErr(`Warning: the files of page #${page.id} were deleted, but the deletion was not committed. Run "inkwell git commit" to record it.`)
+  }
 
-  const data = { removed: doomed.map((target) => ({ pageId: target.id, title: target.title, relPath: target.relPath })) }
+  const data = { removed: doomed.map((target) => ({ pageId: target.id, title: target.title, relPath: target.relPath })), sha, skipped }
   if (json) {
-    writeJson(successEnvelope('page rm', data, { root: ctx.docsRoot, keptDocuments: true }))
+    writeJson(successEnvelope('page rm', data, { root: ctx.docsRoot }))
     return 0
   }
-  writeOut(`Removed ${doomed.length} page${doomed.length === 1 ? '' : 's'}. The .md files stay on disk.`)
+  writeOut(`Removed ${doomed.length} page${doomed.length === 1 ? '' : 's'} and ${doomed.length === 1 ? 'its file' : 'their files'}.`)
   return 0
+}
+
+async function pruneEmptyDirs(docsRoot: string, stop: string, pageRelPaths: readonly string[]): Promise<void> {
+  const under = (dir: string): boolean => dir !== '.' && (stop === '.' || dir.startsWith(`${stop}/`))
+  const dirs = new Set<string>()
+  for (const relPath of pageRelPaths) {
+    const own = relPath.slice(0, -3)
+    if (under(own)) dirs.add(own)
+    for (let dir = dirname(relPath); under(dir); dir = dirname(dir)) dirs.add(dir)
+  }
+  const deepestFirst = [...dirs].sort((a, b) => b.split('/').length - a.split('/').length)
+  for (const dir of deepestFirst) await rmdir(resolveDocPath(docsRoot, dir)).catch(() => undefined)
 }
 
 async function revisionText(
