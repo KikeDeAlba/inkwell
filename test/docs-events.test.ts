@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -47,7 +47,7 @@ function scratch(t: { after: (fn: () => void) => void }, prefix: string): string
 test('name-status output becomes written, deleted and moved markdown changes, skipping assets', () => {
   const output = ['A', 'dp/infra.md', 'M', 'dp/red.md', 'D', 'dp/old.md', 'R100', 'dp/old-name.md', 'dp/new.md', 'A', 'dp/infra.assets/diagram.md', 'A', 'dp/infra.assets/a.png', 'M', '.gitignore', ''].join('\0')
   assert.deepEqual(parseNameStatus(output), [
-    { action: 'written', relPath: 'dp/infra.md' },
+    { action: 'written', relPath: 'dp/infra.md', created: true },
     { action: 'written', relPath: 'dp/red.md' },
     { action: 'deleted', relPath: 'dp/old.md' },
     { action: 'moved', relPath: 'dp/new.md', from: 'dp/old-name.md' },
@@ -81,6 +81,40 @@ test('merging keeps the last change per path and collapses moves', () => {
     { action: 'written', relPath: 'a.md' },
   ])
   assert.deepEqual(mergeChanges([{ action: 'deleted', relPath: 'a.md' }], [{ action: 'written', relPath: 'a.md' }]), [{ action: 'written', relPath: 'a.md' }])
+  assert.deepEqual(mergeChanges([{ action: 'deleted', relPath: 'a.md' }], [{ action: 'written', relPath: 'a.md', created: true }]), [{ action: 'written', relPath: 'a.md' }])
+})
+
+test('a file created inside a batch and then deleted leaves no trace, and one created then moved is written at its destination', () => {
+  assert.deepEqual(mergeChanges([{ action: 'written', relPath: 'a.md', created: true }], [{ action: 'deleted', relPath: 'a.md' }]), [])
+  assert.deepEqual(
+    mergeChanges([{ action: 'written', relPath: 'a.md', created: true }], [{ action: 'written', relPath: 'a.md' }, { action: 'deleted', relPath: 'a.md' }]),
+    [],
+  )
+  assert.deepEqual(mergeChanges([{ action: 'written', relPath: 'a.md', created: true }], [{ action: 'moved', relPath: 'b.md', from: 'a.md' }]), [
+    { action: 'written', relPath: 'b.md', created: true },
+  ])
+  assert.deepEqual(
+    mergeChanges([{ action: 'written', relPath: 'a.md', created: true }], [{ action: 'moved', relPath: 'b.md', from: 'a.md' }, { action: 'deleted', relPath: 'b.md' }]),
+    [],
+  )
+  assert.deepEqual(mergeChanges([{ action: 'written', relPath: 'a.md' }], [{ action: 'deleted', relPath: 'a.md' }]), [{ action: 'deleted', relPath: 'a.md' }])
+})
+
+test('a batch hides the created flag and reports a created then moved file as written without from', async (t) => {
+  const seen = capture(t)
+  const root = scratch(t, 'inkwell-events-')
+  await initDocsRepo(root)
+  writeFileSync(join(root, 'keep.md'), '# Keep\n')
+  await commitPaths(root, ['keep.md'], { source: 'manual', subject: 'docs: add keep' })
+  seen.length = 0
+  await withEventBatch(async () => {
+    writeFileSync(join(root, 'tmp.md'), '# Temporal con bastante texto para que git lo vea como renombre\n')
+    await commitPaths(root, ['tmp.md'], { source: 'manual', subject: 'docs: add tmp' })
+    renameSync(join(root, 'tmp.md'), join(root, 'final.md'))
+    await commitPaths(root, ['tmp.md', 'final.md'], { source: 'manual', subject: 'docs: move tmp' })
+  })
+  assert.equal(seen.length, 1)
+  assert.deepEqual(seen[0]?.event.changes, [{ action: 'written', relPath: 'final.md' }])
 })
 
 test('a commit emits its markdown changes, and a commit with nothing staged emits nothing', async (t) => {
@@ -119,10 +153,7 @@ test('a batch emits one event for every commit made inside it, even when it thro
   )
   assert.equal(seen.length, 1)
   assert.equal(seen[0]?.event.commit, last)
-  assert.deepEqual(seen[0]?.event.changes, [
-    { action: 'deleted', relPath: 'a.md' },
-    { action: 'written', relPath: 'b.md' },
-  ])
+  assert.deepEqual(seen[0]?.event.changes, [{ action: 'written', relPath: 'b.md' }])
 })
 
 test('a Confluence sync that pulls several pages emits a single event', async (t) => {
@@ -235,7 +266,9 @@ test('page rm --recursive deletes the child pages, their folder and assets in on
   assert.ok(existsSync(join(docs, child.relPath)))
 
   assert.equal(box.run(['page', 'rm', String(root.pageId)]).status, 2)
-  const removed = box.ok('page', 'rm', String(root.pageId), '--recursive')
+  assert.equal(box.run(['page', 'rm', String(root.pageId), '--recursive']).status, 9)
+  assert.ok(existsSync(join(docs, 'apartados/infra.assets/flujo.drawio')))
+  const removed = box.ok('page', 'rm', String(root.pageId), '--recursive', '--force')
   assert.equal(removed.removed.length, 2)
   assert.equal(existsSync(join(docs, 'apartados/infra.md')), false)
   assert.equal(existsSync(join(docs, 'apartados/infra')), false)
@@ -261,4 +294,114 @@ test('notes written by the bita hook emit docs.changed with kind entry', async (
   const events = await received(file, 1)
   assert.equal(events[0].body.changes[0].action, 'written')
   assert.match(events[0].body.changes[0].relPath, /^apartados\/2026\/10\/09-41-/)
+})
+
+function docsGit(box: Sandbox, ...args: string[]): string {
+  return execFileSync('git', args, { cwd: box.env['INKWELL_DOCS_DIR'] as string, encoding: 'utf8', env: box.env })
+}
+
+test('page rm deletes only the files of the removed pages, never entry notes that share their folder', async (t) => {
+  const box = sandbox(t)
+  const docs = box.env['INKWELL_DOCS_DIR'] as string
+  box.ok('space', 'add', 'Proj', '--key', 'PRJ')
+  const year = box.ok('page', 'new', '2026', '--project', 'PRJ').page
+  assert.equal(year.relPath, 'proj/2026.md')
+  const child = box.ok('page', 'new', 'Cierre', '--project', 'PRJ', '--parent', String(year.pageId)).page
+  assert.equal(child.relPath, 'proj/2026/cierre.md')
+  mkdirSync(join(docs, 'proj/2026/05'), { recursive: true })
+  writeFileSync(join(docs, 'proj/2026/05/01-7-x.md'), '# Nota\n')
+  assert.ok(box.ok('commit').sha)
+
+  const removed = box.ok('page', 'rm', String(year.pageId), '--recursive')
+  assert.match(removed.sha, /^[0-9a-f]{40}$/)
+  assert.equal(existsSync(join(docs, 'proj/2026.md')), false)
+  assert.equal(existsSync(join(docs, 'proj/2026/cierre.md')), false)
+  assert.equal(readFileSync(join(docs, 'proj/2026/05/01-7-x.md'), 'utf8'), '# Nota\n')
+  const changed = docsGit(box, 'show', '--name-status', '--format=', 'HEAD').trim().split('\n').sort()
+  assert.deepEqual(changed, ['D\tproj/2026.md', 'D\tproj/2026/cierre.md'])
+  assert.deepEqual(box.ok('status').dirty, [])
+})
+
+test('page rm prunes the child folders it leaves empty and keeps the project folder', async (t) => {
+  const box = sandbox(t)
+  const docs = box.env['INKWELL_DOCS_DIR'] as string
+  box.ok('space', 'add', 'Proj', '--key', 'PRJ')
+  box.ok('page', 'new', 'Otra', '--project', 'PRJ')
+  const root = box.ok('page', 'new', 'Infra', '--project', 'PRJ').page
+  const child = box.ok('page', 'new', 'Red', '--project', 'PRJ', '--parent', String(root.pageId)).page
+  box.ok('page', 'new', 'VPC', '--project', 'PRJ', '--parent', String(child.pageId))
+  assert.ok(existsSync(join(docs, 'proj/infra/red/vpc.md')))
+
+  box.ok('page', 'rm', String(root.pageId), '--recursive')
+  assert.equal(existsSync(join(docs, 'proj/infra')), false)
+  assert.ok(existsSync(join(docs, 'proj/otra.md')))
+})
+
+test('page rm refuses to delete uncommitted changes unless --force', async (t) => {
+  const box = sandbox(t)
+  const docs = box.env['INKWELL_DOCS_DIR'] as string
+  box.ok('space', 'add', 'Proj', '--key', 'PRJ')
+  const page = box.ok('page', 'new', 'Infra', '--project', 'PRJ').page
+  writeFileSync(join(docs, page.relPath), '# Infra\n\nsin guardar\n')
+
+  const refused = box.run(['page', 'rm', String(page.pageId)])
+  assert.equal(refused.status, 9)
+  assert.equal(refused.json.error.code, 'PAGE_FILES_DIRTY')
+  assert.match(refused.json.error.message, /proj\/infra\.md/)
+  assert.ok(existsSync(join(docs, page.relPath)))
+  assert.equal(box.ok('page', 'ls').pages.length, 1)
+
+  const forced = box.ok('page', 'rm', String(page.pageId), '--force')
+  assert.match(forced.sha, /^[0-9a-f]{40}$/)
+  assert.equal(existsSync(join(docs, page.relPath)), false)
+  assert.deepEqual(box.ok('status').dirty, [])
+})
+
+test('page rm warns when the deletion cannot be committed', async (t) => {
+  const box = sandbox(t)
+  const docs = box.env['INKWELL_DOCS_DIR'] as string
+  box.ok('space', 'add', 'Proj', '--key', 'PRJ')
+  const page = box.ok('page', 'new', 'Infra', '--project', 'PRJ').page
+  writeFileSync(join(docs, '.git/index.lock'), '')
+
+  const result = box.run(['page', 'rm', String(page.pageId)])
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(result.json.data.sha, null)
+  assert.equal(result.json.meta.keptDocuments, undefined)
+  assert.match(result.stderr, /deletion was not committed/)
+  assert.equal(existsSync(join(docs, page.relPath)), false)
+})
+
+test('page rm of a page whose file is already gone removes the record, commits nothing and does not warn', async (t) => {
+  const box = sandbox(t)
+  const docs = box.env['INKWELL_DOCS_DIR'] as string
+  box.ok('space', 'add', 'Proj', '--key', 'PRJ')
+  const page = box.ok('page', 'new', 'Infra', '--project', 'PRJ').page
+  rmSync(join(docs, page.relPath))
+  assert.ok(box.ok('commit').sha)
+  const head = docsGit(box, 'rev-parse', 'HEAD')
+
+  const result = box.run(['page', 'rm', String(page.pageId)])
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(result.json.data.sha, null)
+  assert.equal(result.stderr, '')
+  assert.deepEqual(box.ok('page', 'ls').pages, [])
+  assert.equal(docsGit(box, 'rev-parse', 'HEAD'), head)
+})
+
+test('inkwell commit of an external edit reports paths with spaces and unicode verbatim', async (t) => {
+  const box = sandbox(t, { KIT_NO_EVENTS: '' })
+  const file = await subscribe(box)
+  const docs = box.env['INKWELL_DOCS_DIR'] as string
+  box.ok('space', 'add', 'Proj', '--key', 'PRJ')
+  box.ok('page', 'new', 'Infra', '--project', 'PRJ')
+  await received(file, 1)
+  const relPath = 'proj/diseño del año.md'
+  writeFileSync(join(docs, relPath), '# Diseño\n')
+
+  const committed = box.ok('commit')
+  assert.match(committed.sha, /^[0-9a-f]{40}$/)
+  const events = await received(file, 2)
+  assert.equal(events[1].body.commit, committed.sha)
+  assert.deepEqual(events[1].body.changes, [{ action: 'written', relPath }])
 })
