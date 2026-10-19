@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readFile, rm } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { assetRelPath } from '../../docs/diagrams.ts'
 import {
@@ -50,6 +50,7 @@ import {
   commitDocs,
   pageHistory,
   pathAtRev,
+  prepareDocsRepo,
   readBlob,
   requireDocsRepo,
   resolveRev,
@@ -716,14 +717,18 @@ async function runRemove(ctx: PageContext, args: ParsedArgs, positional: string[
   }
 
   const doomed = [...children.reverse(), page]
+  await prepareDocsRepo(ctx.docsRoot)
+  const paths = doomed.flatMap((target) => pageFilePaths(target.relPath))
+  for (const relPath of paths) await rm(resolveDocPath(ctx.docsRoot, relPath), { recursive: true, force: true })
   for (const target of doomed) deletePage(ctx.db, target.id)
+  const sha = await commitDocs(ctx.docsRoot, paths, pageCommitIntent(page, page.relPath, 'remove', {}))
 
-  const data = { removed: doomed.map((target) => ({ pageId: target.id, title: target.title, relPath: target.relPath })) }
+  const data = { removed: doomed.map((target) => ({ pageId: target.id, title: target.title, relPath: target.relPath })), sha }
   if (json) {
-    writeJson(successEnvelope('page rm', data, { root: ctx.docsRoot, keptDocuments: true }))
+    writeJson(successEnvelope('page rm', data, { root: ctx.docsRoot }))
     return 0
   }
-  writeOut(`Removed ${doomed.length} page${doomed.length === 1 ? '' : 's'}. The .md files stay on disk.`)
+  writeOut(`Removed ${doomed.length} page${doomed.length === 1 ? '' : 's'} and ${doomed.length === 1 ? 'its file' : 'their files'}.`)
   return 0
 }
 
