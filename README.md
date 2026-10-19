@@ -115,6 +115,25 @@ el sobre de kit (`{ schemaVersion, ok, command, generatedAt, data | error }`).
 `--project` (alias `--space`) acepta el nombre, la clave, el id del espacio o el
 id del proyecto de bita del que se migró.
 
+### Borrar páginas
+
+`inkwell page rm <id>` borra el registro, el `.md` y la carpeta `.assets` de la
+página, y deja el borrado en un commit. Con `--recursive` hace lo mismo con
+cada página hija que la base tenga registrada; sin él, una página con hijas
+falla con un error de uso. Solo se borran archivos de las páginas condenadas:
+después se quitan las carpetas de las hijas que quedaron vacías, de la más
+honda a la más alta, y cualquier otro archivo que viva ahí (por ejemplo, las
+notas de entrada de `proj/2026/` cuando la página se llama «2026») se queda.
+
+Si alguno de esos archivos tiene cambios sin commitear, el comando falla con
+`PAGE_FILES_DIRTY` (código de salida 9) y no toca nada; `--force` los borra de
+todos modos. Si el borrado no se pudo commitear, avisa por stderr y lo deja
+pendiente para `inkwell git commit`.
+
+Con `--json`, `data` trae `removed` (`pageId`, `title`, `relPath` de cada página)
+y `sha` (el commit, o `null` si no hubo nada que commitear, como cuando el
+archivo ya no existía). `meta` ya no trae `keptDocuments`.
+
 ## Notas por entrada
 
 Cada entrada de tiempo de bita tiene una nota en
@@ -143,6 +162,48 @@ la renombra o la mueve cuando cambia el título o el proyecto, `stop` sella el
 fin y la duración, `merge` pasa las secciones de las entradas absorbidas a la
 que sobrevive y borra las suyas, y `cancel` y `delete` la borran. Cada cambio es
 un commit.
+
+## Eventos
+
+Cada commit que inkwell hace en la rama principal del repositorio de
+documentos emite `docs.changed` por kit, para que otra herramienta (un
+índice, un buscador) se entere sin vigilar el repositorio. Lo emiten
+`page new`, `write`, `rename`, `rm` y `restore`, las notas por entrada (también
+las que escriben los eventos de bita), `inkwell git commit`, `normalize`,
+`branch apply`, `confluence sync` y la migración desde bita. Una propuesta
+(`git propose`) vive en su rama y no emite nada hasta que se aplica. Un commit
+sin cambios en markdown (solo assets o `.gitignore`) tampoco emite.
+
+El documento del evento:
+
+```json
+{
+  "docsRoot": "/home/ana/.local/share/inkwell/docs",
+  "commit": "9f1c…",
+  "changes": [
+    { "action": "written", "relPath": "apartados/arquitectura.md" },
+    { "action": "moved", "relPath": "apartados/red.md", "from": "apartados/infra.md" },
+    { "action": "deleted", "relPath": "apartados/2026/10/09-41-revisar-el-waf.md" }
+  ]
+}
+```
+
+- `changes` lista solo archivos `.md` fuera de las carpetas `.assets`, con rutas
+  relativas a `docsRoot`, tal como las guarda git (espacios y acentos incluidos).
+- `action` es `written` (creado o modificado), `deleted` o `moved`; `moved`
+  trae `from` y sale de la detección de renombres de git (similitud de 30 %).
+- `commit` es el último commit que cubre el evento.
+- El atributo `kind` vale `page`, `entry` (notas por entrada) o `mixed`, y sirve
+  para filtrar la suscripción (`filter: { kind: ["entry"] }`).
+
+Un comando que hace varios commits (`confluence sync`, la resolución de un
+conflicto, `normalize`, la migración desde bita) emite un solo evento al
+terminar, aunque falle a medias, con los cambios fusionados por ruta: lo último
+que le pasó a cada archivo, un `moved` encadenado se reduce a su origen, un
+archivo creado y borrado dentro del mismo comando no aparece, y uno creado y
+luego movido aparece como `written` en su destino. Si el evento no se puede
+emitir, el commit se queda y inkwell avisa por stderr; `KIT_NO_EVENTS=1` los
+apaga.
 
 ## Autodoc
 
