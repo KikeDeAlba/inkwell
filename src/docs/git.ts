@@ -5,7 +5,7 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DOCS_GIT_LOCK_STALE_MS, DOCS_GIT_LOCK_TIMEOUT_MS } from '../config/constants.ts'
 import { ConflictError, MergeConflictError, NotFoundError, UsageError } from '../errors.ts'
-import { DOCS_CHANGED_EVENT, emitDocsChanged, parseNameStatus, type DocsChange } from './events.ts'
+import { emitDocsChanged, parseNameStatus, warnEmit, type TrackedChange } from './events.ts'
 import { execGit, type GitResult } from './git-exec.ts'
 import { relativeDocPath } from './paths.ts'
 import { NO_PROJECT_SLUG } from './slug.ts'
@@ -363,7 +363,7 @@ export async function commitPaths(root: string, paths: readonly string[], intent
   return sha
 }
 
-export async function commitChanges(root: string, sha: string): Promise<DocsChange[]> {
+export async function commitChanges(root: string, sha: string): Promise<TrackedChange[]> {
   const out = await git(root, ['diff-tree', '--no-commit-id', '--name-status', '-r', `-M${RENAME_SIMILARITY}`, '--root', '-z', sha])
   return parseNameStatus(out)
 }
@@ -372,9 +372,7 @@ async function announceCommit(root: string, sha: string): Promise<void> {
   try {
     await emitDocsChanged({ docsRoot: resolve(root), commit: sha, changes: await commitChanges(root, sha) })
   } catch (error) {
-    process.stderr.write(
-      `Warning: the docs change was committed, but ${DOCS_CHANGED_EVENT} could not be emitted: ${error instanceof Error ? error.message : String(error)}\n`,
-    )
+    warnEmit(error)
   }
 }
 

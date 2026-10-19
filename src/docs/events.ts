@@ -21,10 +21,20 @@ export interface DocsChangedEvent {
   changes: DocsChange[]
 }
 
+export interface TrackedChange extends DocsChange {
+  created?: boolean
+}
+
+export interface TrackedEvent {
+  docsRoot: string
+  commit: string | null
+  changes: readonly TrackedChange[]
+}
+
 export type DocsEventSink = (event: DocsChangedEvent, kind: DocsChangeKind) => Promise<void>
 
 interface Batch {
-  pending: Map<string, { commit: string | null; changes: DocsChange[] }>
+  pending: Map<string, { commit: string | null; changes: TrackedChange[] }>
 }
 
 const batches = new AsyncLocalStorage<Batch>()
@@ -47,40 +57,46 @@ export function changeKind(changes: readonly DocsChange[]): DocsChangeKind {
   return 'mixed'
 }
 
-export function parseNameStatus(output: string): DocsChange[] {
+export function parseNameStatus(output: string): TrackedChange[] {
   const fields = output.split('\0')
-  const changes: DocsChange[] = []
+  const changes: TrackedChange[] = []
   let index = 0
   while (index < fields.length) {
     const status = fields[index] ?? ''
     index += 1
     if (status.length === 0) continue
     const code = status.charAt(0)
-    if (code === 'R' || code === 'C') {
+    if (code === 'R') {
       const from = fields[index] ?? ''
       const to = fields[index + 1] ?? ''
       index += 2
       const fromDoc = isDocsMarkdown(from)
       const toDoc = isDocsMarkdown(to)
-      if (code === 'R' && fromDoc && toDoc) changes.push({ action: 'moved', relPath: to, from })
+      if (fromDoc && toDoc) changes.push({ action: 'moved', relPath: to, from })
       else {
-        if (code === 'R' && fromDoc) changes.push({ action: 'deleted', relPath: from })
-        if (toDoc) changes.push({ action: 'written', relPath: to })
+        if (fromDoc) changes.push({ action: 'deleted', relPath: from })
+        if (toDoc) changes.push({ action: 'written', relPath: to, created: true })
       }
       continue
     }
     const path = fields[index] ?? ''
     index += 1
     if (!isDocsMarkdown(path)) continue
-    changes.push({ action: code === 'D' ? 'deleted' : 'written', relPath: path })
+    if (code === 'D') changes.push({ action: 'deleted', relPath: path })
+    else if (code === 'A') changes.push({ action: 'written', relPath: path, created: true })
+    else changes.push({ action: 'written', relPath: path })
   }
   return changes
 }
 
-export function mergeChanges(current: readonly DocsChange[], next: readonly DocsChange[]): DocsChange[] {
-  const byPath = new Map<string, DocsChange>()
+function publicChange(change: TrackedChange): DocsChange {
+  return change.from === undefined ? { action: change.action, relPath: change.relPath } : { action: change.action, relPath: change.relPath, from: change.from }
+}
+
+export function mergeChanges(current: readonly TrackedChange[], next: readonly TrackedChange[]): TrackedChange[] {
+  const byPath = new Map<string, TrackedChange>()
   for (const change of current) byPath.set(change.relPath, change)
-  const put = (change: DocsChange): void => {
+  const put = (change: TrackedChange): void => {
     byPath.delete(change.relPath)
     byPath.set(change.relPath, change)
   }
@@ -88,14 +104,18 @@ export function mergeChanges(current: readonly DocsChange[], next: readonly Docs
   for (const change of next) {
     const existing = byPath.get(change.relPath)
     if (change.action === 'written') {
-      put(existing?.action === 'moved' ? existing : change)
+      if (existing?.action === 'moved') put(existing)
+      else if (existing?.action === 'written') put({ action: 'written', relPath: change.relPath, ...(existing.created ? { created: true } : {}) })
+      else if (existing?.action === 'deleted') put({ action: 'written', relPath: change.relPath })
+      else put(change)
       continue
     }
     if (change.action === 'deleted') {
       if (existing?.action === 'moved' && existing.from !== undefined) {
         byPath.delete(change.relPath)
         put({ action: 'deleted', relPath: existing.from })
-      } else put(change)
+      } else if (existing?.created) byPath.delete(change.relPath)
+      else put(change)
       continue
     }
     const source = change.from === undefined ? undefined : byPath.get(change.from)
@@ -103,6 +123,10 @@ export function mergeChanges(current: readonly DocsChange[], next: readonly Docs
     if (source !== undefined && change.from !== undefined) {
       byPath.delete(change.from)
       if (source.action === 'moved') origin = source.from
+      if (source.created) {
+        put({ action: 'written', relPath: change.relPath, created: true })
+        continue
+      }
     }
     if (origin === undefined || origin === change.relPath) put({ action: 'written', relPath: change.relPath })
     else put({ action: 'moved', relPath: change.relPath, from: origin })
@@ -134,22 +158,23 @@ async function fireDocsChanged(event: DocsChangedEvent, kind: DocsChangeKind): P
   )
 }
 
-function warnEmit(error: unknown): void {
+export function warnEmit(error: unknown): void {
   process.stderr.write(
     `Warning: the docs change was committed, but ${DOCS_CHANGED_EVENT} could not be emitted: ${error instanceof Error ? error.message : String(error)}\n`,
   )
 }
 
-async function deliver(event: DocsChangedEvent): Promise<void> {
+async function deliver(event: TrackedEvent): Promise<void> {
   if (event.changes.length === 0) return
+  const changes = event.changes.map(publicChange)
   try {
-    await (sinkOverride ?? fireDocsChanged)(event, changeKind(event.changes))
+    await (sinkOverride ?? fireDocsChanged)({ docsRoot: event.docsRoot, commit: event.commit, changes }, changeKind(changes))
   } catch (error) {
     warnEmit(error)
   }
 }
 
-export async function emitDocsChanged(event: DocsChangedEvent): Promise<void> {
+export async function emitDocsChanged(event: TrackedEvent): Promise<void> {
   if (event.changes.length === 0) return
   const batch = batches.getStore()
   if (batch === undefined) {
