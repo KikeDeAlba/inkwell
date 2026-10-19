@@ -455,6 +455,7 @@ test('hook session-end launches the run in the background and returns at once', 
   while (Date.now() < deadline && !(existsSync(log) && /nothing-new/.test(readFileSync(log, 'utf8')))) await new Promise((done) => setTimeout(done, 100))
   assert.match(readFileSync(log, 'utf8'), /^\S+ autodoc abcdef12 \[-\] 12 chars -> skip:nothing-new$/m)
   if (process.platform !== 'win32') assert.equal(statSync(log).mode & 0o777, 0o600)
+  await new Promise((done) => setTimeout(done, 1000))
 })
 
 test('only maxActions actions are applied and the rest are skipped, even inside a fenced answer', (t) => {
