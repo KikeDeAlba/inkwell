@@ -135,6 +135,10 @@ inkwell branch ls | diff <rama> | apply <rama> --commit <sha> | drop <rama>
 
 Una propuesta (por ejemplo, lo que salió de una reunión) va a una rama sin tocar
 la página; se aplica después con `branch apply`.
+Las propuestas `autodoc/*` salen solas al cerrar una sesión de Claude Code: se
+listan con `inkwell autodoc ls` y se revisan con `branch diff` y `branch apply`.
+Las páginas nuevas del autodoc no suben a Confluence hasta
+`inkwell autodoc approve <id>`.
 
 ## PDF
 
