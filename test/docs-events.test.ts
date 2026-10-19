@@ -17,7 +17,8 @@ import {
   type DocsChangeKind,
 } from '../src/docs/events.ts'
 import { commitPaths, initDocsRepo } from '../src/docs/git.ts'
-import { openMemoryDatabase } from '../src/db/open.ts'
+import { openDatabase, openMemoryDatabase } from '../src/db/open.ts'
+import { upsertEntryNote } from '../src/db/entry-notes.ts'
 import { insertSpace, updateSpace, findSpaceById } from '../src/db/spaces.ts'
 import { syncProject } from '../src/confluence/sync.ts'
 import { EMITTED_EVENTS, manifest } from '../src/setup.ts'
@@ -98,6 +99,13 @@ test('a file created inside a batch and then deleted leaves no trace, and one cr
     [],
   )
   assert.deepEqual(mergeChanges([{ action: 'written', relPath: 'a.md' }], [{ action: 'deleted', relPath: 'a.md' }]), [{ action: 'deleted', relPath: 'a.md' }])
+})
+
+test('a file moved away, recreated at its old path and with the moved copy deleted ends as written at the old path', () => {
+  assert.deepEqual(
+    mergeChanges([{ action: 'moved', relPath: 'b.md', from: 'a.md' }], [{ action: 'written', relPath: 'a.md', created: true }, { action: 'deleted', relPath: 'b.md' }]),
+    [{ action: 'written', relPath: 'a.md' }],
+  )
 })
 
 test('a batch hides the created flag and reports a created then moved file as written without from', async (t) => {
@@ -404,4 +412,80 @@ test('inkwell commit of an external edit reports paths with spaces and unicode v
   const events = await received(file, 2)
   assert.equal(events[1].body.commit, committed.sha)
   assert.deepEqual(events[1].body.changes, [{ action: 'written', relPath }])
+})
+
+test('page rm does not warn about an uncommitted deletion when only untracked files were deleted', async (t) => {
+  const box = sandbox(t)
+  const docs = box.env['INKWELL_DOCS_DIR'] as string
+  box.ok('space', 'add', 'Proj', '--key', 'PRJ')
+  const page = box.ok('page', 'new', 'Infra', '--project', 'PRJ').page
+  rmSync(join(docs, page.relPath))
+  assert.ok(box.ok('commit').sha)
+  mkdirSync(join(docs, 'proj/infra.assets'), { recursive: true })
+  writeFileSync(join(docs, 'proj/infra.assets/borrador.drawio'), '<mxfile/>')
+
+  const result = box.run(['page', 'rm', String(page.pageId), '--force'])
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(result.json.data.sha, null)
+  assert.equal(result.stderr, '')
+  assert.equal(existsSync(join(docs, 'proj/infra.assets')), false)
+})
+
+test('page rm without a usable git history needs --force to delete files', async (t) => {
+  const box = sandbox(t)
+  const docs = box.env['INKWELL_DOCS_DIR'] as string
+  box.ok('space', 'add', 'Proj', '--key', 'PRJ')
+  const page = box.ok('page', 'new', 'Infra', '--project', 'PRJ').page
+  box.env['PATH'] = join(box.dir, 'no-git')
+
+  const refused = box.run(['page', 'rm', String(page.pageId)])
+  assert.equal(refused.status, 9)
+  assert.equal(refused.json.error.code, 'DOCS_REPO_UNAVAILABLE')
+  assert.ok(existsSync(join(docs, page.relPath)))
+  assert.equal(box.ok('page', 'ls').pages.length, 1)
+
+  const forced = box.run(['page', 'rm', String(page.pageId), '--force'])
+  assert.equal(forced.status, 0, forced.stderr)
+  assert.equal(forced.json.data.sha, null)
+  assert.doesNotMatch(forced.stderr, /not committed/)
+  assert.equal(existsSync(join(docs, page.relPath)), false)
+})
+
+test('page rm never deletes a file registered as an entry note, even when a page points at it', async (t) => {
+  const box = sandbox(t)
+  const docs = box.env['INKWELL_DOCS_DIR'] as string
+  box.ok('space', 'add', 'Proj', '--key', 'PRJ')
+  const year = box.ok('page', 'new', '2026', '--project', 'PRJ').page
+  const month = box.ok('page', 'new', '05', '--project', 'PRJ', '--parent', String(year.pageId)).page
+  const clash = box.ok('page', 'new', '01-7-x', '--project', 'PRJ', '--parent', String(month.pageId)).page
+  assert.equal(clash.relPath, 'proj/2026/05/01-7-x.md')
+  const db = openDatabase(box.env['INKWELL_DB_PATH'] as string)
+  upsertEntryNote(db, {
+    entryId: 7,
+    relPath: clash.relPath,
+    spaceId: null,
+    title: 'x',
+    titleSlug: 'x',
+    source: 'test',
+    sectionCount: 0,
+    byteSize: 0,
+    checksum: '',
+    projectId: null,
+    projectName: null,
+    entryKind: null,
+    startedAt: '2026-05-01T15:00:00.000Z',
+    stoppedAt: null,
+    issueKey: null,
+    now: '2026-05-01T15:00:00.000Z',
+  })
+  db.close()
+
+  const result = box.run(['page', 'rm', String(year.pageId), '--recursive'])
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(result.json.data.skipped, [clash.relPath])
+  assert.match(result.stderr, /proj\/2026\/05\/01-7-x\.md is an entry note/)
+  assert.ok(existsSync(join(docs, clash.relPath)))
+  assert.equal(existsSync(join(docs, 'proj/2026.md')), false)
+  assert.equal(existsSync(join(docs, 'proj/2026/05.md')), false)
+  assert.deepEqual(box.ok('page', 'ls').pages, [])
 })

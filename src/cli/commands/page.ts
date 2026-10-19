@@ -41,6 +41,7 @@ import { inspectDocFile } from '../../docs/inspect.ts'
 import { outline, parseDocument, type DocHeading, type ParsedDocument } from '../../docs/markdown.ts'
 import { backlogHeadings } from '../../docs/backlog-extract.ts'
 import { listBacklogItems } from '../../db/backlog.ts'
+import { findNoteByRelPath } from '../../db/entry-notes.ts'
 import { linkedSpaceFor } from '../../db/spaces.ts'
 import { clearAutodocPending } from '../../db/autodoc-runs.ts'
 import { PAGE_SPLIT_BYTES, PAGE_SPLIT_SECTIONS } from '../../config/constants.ts'
@@ -49,6 +50,8 @@ import { recordPageDoc, movePageFile, pageCommitIntent, pageFilePaths } from '..
 import {
   commitDocs,
   docsStatus,
+  gitAvailable,
+  isDocsRepo,
   pageHistory,
   pathAtRev,
   prepareDocsRepo,
@@ -719,27 +722,40 @@ async function runRemove(ctx: PageContext, args: ParsedArgs, positional: string[
   }
 
   const doomed = [...children.reverse(), page]
+  const force = readBoolean(args, 'force')
   await prepareDocsRepo(ctx.docsRoot)
-  const paths = doomed.flatMap((target) => [target.relPath, assetsRelDir(target.relPath)])
-  const dirty = (await docsStatus(ctx.docsRoot)).filter((file) => paths.some((path) => file.path === path || file.path.startsWith(`${path}/`)))
-  if (dirty.length > 0 && !readBoolean(args, 'force')) {
+  const versioned = isDocsRepo(ctx.docsRoot) && (await gitAvailable())
+  if (!versioned && !force) {
+    throw new ConflictError(
+      `${ctx.docsRoot} has no usable git history, so the files of page #${page.id} could not be recovered after deleting them.`,
+      'DOCS_REPO_UNAVAILABLE',
+      'Install git or run "inkwell git init", or pass --force to delete them without history.',
+    )
+  }
+  const skipped = doomed.map((target) => target.relPath).filter((relPath) => findNoteByRelPath(ctx.db, relPath) !== undefined)
+  const paths = doomed.flatMap((target) => [target.relPath, assetsRelDir(target.relPath)]).filter((relPath) => !skipped.includes(relPath))
+  const covers = (path: string, file: string): boolean => file === path || file.startsWith(`${path}/`)
+  const dirty = versioned ? (await docsStatus(ctx.docsRoot)).filter((file) => paths.some((path) => covers(path, file.path))) : []
+  if (dirty.length > 0 && !force) {
     throw new ConflictError(
       `Page #${page.id} has uncommitted changes in ${dirty.map((file) => file.path).join(', ')}.`,
       'PAGE_FILES_DIRTY',
       'Commit them with "inkwell git commit" or pass --force to delete them anyway.',
     )
   }
+  for (const relPath of skipped) writeErr(`Warning: ${relPath} is an entry note, so page rm left it in place.`)
   const existing = paths.filter((relPath) => existsSync(resolveDocPath(ctx.docsRoot, relPath)))
   for (const relPath of existing) await rm(resolveDocPath(ctx.docsRoot, relPath), { recursive: true, force: true })
   await pruneEmptyDirs(ctx.docsRoot, dirname(page.relPath), doomed.map((target) => target.relPath))
   for (const target of doomed) deletePage(ctx.db, target.id)
-  const sha = await commitDocs(ctx.docsRoot, paths, pageCommitIntent(page, page.relPath, 'remove', {}))
-  const untracked = new Set(dirty.filter((file) => file.status === 'untracked').map((file) => file.path))
-  if (sha === null && existing.some((relPath) => !untracked.has(relPath))) {
+  const sha = versioned ? await commitDocs(ctx.docsRoot, paths, pageCommitIntent(page, page.relPath, 'remove', {})) : null
+  const untracked = dirty.filter((file) => file.status === 'untracked')
+  const committable = existing.some((relPath) => !untracked.some((file) => covers(relPath, file.path)))
+  if (versioned && sha === null && committable) {
     writeErr(`Warning: the files of page #${page.id} were deleted, but the deletion was not committed. Run "inkwell git commit" to record it.`)
   }
 
-  const data = { removed: doomed.map((target) => ({ pageId: target.id, title: target.title, relPath: target.relPath })), sha }
+  const data = { removed: doomed.map((target) => ({ pageId: target.id, title: target.title, relPath: target.relPath })), sha, skipped }
   if (json) {
     writeJson(successEnvelope('page rm', data, { root: ctx.docsRoot }))
     return 0

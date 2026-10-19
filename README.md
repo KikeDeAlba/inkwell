@@ -127,12 +127,18 @@ notas de entrada de `proj/2026/` cuando la página se llama «2026») se queda.
 
 Si alguno de esos archivos tiene cambios sin commitear, el comando falla con
 `PAGE_FILES_DIRTY` (código de salida 9) y no toca nada; `--force` los borra de
-todos modos. Si el borrado no se pudo commitear, avisa por stderr y lo deja
-pendiente para `inkwell git commit`.
+todos modos. Si no hay un historial de git utilizable (git no está instalado o
+el repositorio no se pudo iniciar), falla con `DOCS_REPO_UNAVAILABLE` y no toca
+nada; con `--force` borra los archivos sin commit. Si el borrado no se pudo
+commitear, avisa por stderr y lo deja pendiente para `inkwell git commit`.
 
-Con `--json`, `data` trae `removed` (`pageId`, `title`, `relPath` de cada página)
-y `sha` (el commit, o `null` si no hubo nada que commitear, como cuando el
-archivo ya no existía). `meta` ya no trae `keptDocuments`.
+Un archivo registrado como nota de entrada nunca se borra, aunque la ruta de
+una página coincida con la suya: se omite y se avisa por stderr.
+
+Con `--json`, `data` trae `removed` (`pageId`, `title`, `relPath` de cada página),
+`sha` (el commit, o `null` si no hubo nada que commitear, como cuando el
+archivo ya no existía) y `skipped` (las rutas omitidas por ser notas de
+entrada). `meta` ya no trae `keptDocuments`.
 
 ## Notas por entrada
 
