@@ -10,7 +10,7 @@
       "name": "inkwell",
       "description": "Write and keep technical documentation with the inkwell CLI: pages in git, entry notes, backlog, diagrams and Confluence",
       "source": "./",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "category": "productivity",
       "tags": ["documentation", "markdown", "confluence", "diagrams"]
     }
