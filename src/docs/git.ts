@@ -333,7 +333,8 @@ function toRelative(root: string, path: string): string {
   return isAbsolute(path) ? relativeDocPath(root, path) : path.split('\\').join('/')
 }
 
-async function trackedUnder(root: string, paths: readonly string[]): Promise<string[]> {
+export async function trackedUnder(root: string, paths: readonly string[]): Promise<string[]> {
+  if (paths.length === 0) return []
   const out = await git(root, ['ls-files', '-z', '--', ...paths])
   return out.split('\0').filter((path) => path.length > 0)
 }

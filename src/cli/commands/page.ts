@@ -53,6 +53,7 @@ import {
   gitAvailable,
   isDocsRepo,
   pageHistory,
+  trackedUnder,
   pathAtRev,
   prepareDocsRepo,
   readBlob,
@@ -733,7 +734,7 @@ async function runRemove(ctx: PageContext, args: ParsedArgs, positional: string[
     )
   }
   const skipped = doomed.map((target) => target.relPath).filter((relPath) => findNoteByRelPath(ctx.db, relPath) !== undefined)
-  const paths = doomed.flatMap((target) => [target.relPath, assetsRelDir(target.relPath)]).filter((relPath) => !skipped.includes(relPath))
+  const paths = doomed.filter((target) => !skipped.includes(target.relPath)).flatMap((target) => [target.relPath, assetsRelDir(target.relPath)])
   const covers = (path: string, file: string): boolean => file === path || file.startsWith(`${path}/`)
   const dirty = versioned ? (await docsStatus(ctx.docsRoot)).filter((file) => paths.some((path) => covers(path, file.path))) : []
   if (dirty.length > 0 && !force) {
@@ -745,13 +746,12 @@ async function runRemove(ctx: PageContext, args: ParsedArgs, positional: string[
   }
   for (const relPath of skipped) writeErr(`Warning: ${relPath} is an entry note, so page rm left it in place.`)
   const existing = paths.filter((relPath) => existsSync(resolveDocPath(ctx.docsRoot, relPath)))
+  const tracked = versioned ? await trackedUnder(ctx.docsRoot, existing) : []
   for (const relPath of existing) await rm(resolveDocPath(ctx.docsRoot, relPath), { recursive: true, force: true })
   await pruneEmptyDirs(ctx.docsRoot, dirname(page.relPath), doomed.map((target) => target.relPath))
   for (const target of doomed) deletePage(ctx.db, target.id)
   const sha = versioned ? await commitDocs(ctx.docsRoot, paths, pageCommitIntent(page, page.relPath, 'remove', {})) : null
-  const untracked = dirty.filter((file) => file.status === 'untracked')
-  const committable = existing.some((relPath) => !untracked.some((file) => covers(relPath, file.path)))
-  if (versioned && sha === null && committable) {
+  if (versioned && sha === null && tracked.length > 0) {
     writeErr(`Warning: the files of page #${page.id} were deleted, but the deletion was not committed. Run "inkwell git commit" to record it.`)
   }
 

@@ -101,6 +101,13 @@ test('a file created inside a batch and then deleted leaves no trace, and one cr
   assert.deepEqual(mergeChanges([{ action: 'written', relPath: 'a.md' }], [{ action: 'deleted', relPath: 'a.md' }]), [{ action: 'deleted', relPath: 'a.md' }])
 })
 
+test('a path that receives another moved file keeps that move when its own moved copy is deleted', () => {
+  assert.deepEqual(
+    mergeChanges([{ action: 'moved', relPath: 'b.md', from: 'a.md' }], [{ action: 'moved', relPath: 'a.md', from: 'c.md' }, { action: 'deleted', relPath: 'b.md' }]),
+    [{ action: 'moved', relPath: 'a.md', from: 'c.md' }],
+  )
+})
+
 test('a file moved away, recreated at its old path and with the moved copy deleted ends as written at the old path', () => {
   assert.deepEqual(
     mergeChanges([{ action: 'moved', relPath: 'b.md', from: 'a.md' }], [{ action: 'written', relPath: 'a.md', created: true }, { action: 'deleted', relPath: 'b.md' }]),
@@ -479,13 +486,38 @@ test('page rm never deletes a file registered as an entry note, even when a page
     now: '2026-05-01T15:00:00.000Z',
   })
   db.close()
+  mkdirSync(join(docs, 'proj/2026/05/01-7-x.assets'), { recursive: true })
+  writeFileSync(join(docs, 'proj/2026/05/01-7-x.assets/flujo.drawio'), '<mxfile/>')
+  assert.ok(box.ok('commit').sha)
 
   const result = box.run(['page', 'rm', String(year.pageId), '--recursive'])
   assert.equal(result.status, 0, result.stderr)
   assert.deepEqual(result.json.data.skipped, [clash.relPath])
   assert.match(result.stderr, /proj\/2026\/05\/01-7-x\.md is an entry note/)
   assert.ok(existsSync(join(docs, clash.relPath)))
+  assert.ok(existsSync(join(docs, 'proj/2026/05/01-7-x.assets/flujo.drawio')))
+  const stat = docsGit(box, 'show', '--stat=200', '--format=', result.json.data.sha)
+  assert.match(stat, /proj\/2026\.md/)
+  assert.doesNotMatch(stat, /01-7-x/)
   assert.equal(existsSync(join(docs, 'proj/2026.md')), false)
   assert.equal(existsSync(join(docs, 'proj/2026/05.md')), false)
   assert.deepEqual(box.ok('page', 'ls').pages, [])
+})
+
+test('page rm warns when tracked files were deleted but not committed, even next to untracked ones', async (t) => {
+  const box = sandbox(t)
+  const docs = box.env['INKWELL_DOCS_DIR'] as string
+  box.ok('space', 'add', 'Proj', '--key', 'PRJ')
+  const page = box.ok('page', 'new', 'Infra', '--project', 'PRJ').page
+  rmSync(join(docs, page.relPath))
+  mkdirSync(join(docs, 'proj/infra.assets'), { recursive: true })
+  writeFileSync(join(docs, 'proj/infra.assets/flujo.drawio'), '<mxfile/>')
+  assert.ok(box.ok('commit').sha)
+  writeFileSync(join(docs, 'proj/infra.assets/borrador.drawio'), '<mxfile/>')
+  writeFileSync(join(docs, '.git/index.lock'), '')
+
+  const result = box.run(['page', 'rm', String(page.pageId), '--force'])
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(result.json.data.sha, null)
+  assert.match(result.stderr, /deletion was not committed/)
 })
