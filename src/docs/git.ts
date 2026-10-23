@@ -245,10 +245,17 @@ export function docsLockPath(root: string): string {
   return join(root, '.git', 'inkwell.lock')
 }
 
+export const DOCS_GIT_LOCK_TIMEOUT_ENV = 'INKWELL_DOCS_LOCK_TIMEOUT_MS'
+
+export function docsLockTimeout(env: NodeJS.ProcessEnv = process.env): number {
+  const value = Number(env[DOCS_GIT_LOCK_TIMEOUT_ENV])
+  return Number.isInteger(value) && value > 0 ? value : DOCS_GIT_LOCK_TIMEOUT_MS
+}
+
 export async function withDocsGitLock<T>(
   root: string,
   run: () => Promise<T>,
-  timeoutMs: number = DOCS_GIT_LOCK_TIMEOUT_MS,
+  timeoutMs: number = docsLockTimeout(),
 ): Promise<T> {
   const lockPath = docsLockPath(root)
   const deadline = Date.now() + timeoutMs

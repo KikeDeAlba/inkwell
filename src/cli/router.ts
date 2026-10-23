@@ -1,3 +1,4 @@
+import { agents } from '@kikedealba/kit'
 import { ConflictError, NotFoundError, UsageError, MergeConflictError, exitCodeOf } from '../errors.ts'
 import { VERSION } from '../version.ts'
 import { errorEnvelope, writeErr, writeJson, writeOut } from './output.ts'
@@ -63,8 +64,8 @@ Confluence (through atl):
   inkwell confluence publish-diagrams <pageId> --to <confluencePageId>
 
 Setup:
-  inkwell setup [--agents detected|all|claude,opencode,codex,gemini] [--no-agents] [--no-drawio]
-    (Claude Code gets the inkwell plugin; the other agents get the skill files)
+  inkwell setup [--agents detected|all|${agents.AGENTS.join(',')}] [--no-agents] [--no-drawio]
+    (Claude Code gets the inkwell plugin; the other agents get the skill, the draw.io MCP and the autodoc hooks where they exist)
   inkwell uninstall
   inkwell migrate --from-bita [--dry-run] [--bita-db PATH] [--bita-docs DIR] | migrate status
   inkwell migrate notes --from-bita [--dry-run] [--bita-db PATH] [--bita-docs DIR]

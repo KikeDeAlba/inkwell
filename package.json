@@ -1,6 +1,6 @@
 {
   "name": "@kikedealba/inkwell",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Living technical documentation from the terminal: page trees and per-entry notes in markdown with git history, a backlog, diagrams, PDF export and Confluence sync.",
   "license": "MIT",
   "author": "Jesus Enrique De Alba Gaytan",
@@ -24,7 +24,8 @@
     "claude-code",
     "gemini-cli",
     "codex",
-    "opencode"
+    "opencode",
+    "antigravity"
   ],
   "type": "module",
   "packageManager": "pnpm@11.22.0",
@@ -54,7 +55,7 @@
     "inkwell": "node src/bin/inkwell.ts"
   },
   "dependencies": {
-    "@kikedealba/kit": "^0.3.0",
+    "@kikedealba/kit": "^0.7.1",
     "marked": "^18.1.0"
   },
   "devDependencies": {

@@ -32,7 +32,7 @@ ausente falla con un error claro (`BITA_MISSING`, `ATL_MISSING`,
 ```sh
 npm install -g @kikedealba/inkwell
 inkwell setup                          # registro de kit + plugin de Claude Code + skill para los demás agentes
-inkwell setup --agents codex,gemini    # o solo algunos: claude, opencode, codex, gemini
+inkwell setup --agents codex,gemini    # o solo algunos: claude, opencode, codex, gemini, antigravity, claude-desktop
 ```
 
 `setup` deja el manifiesto en el registro de kit (con la suscripción a los
@@ -41,7 +41,10 @@ eventos de bita) y prepara a cada agente:
 | Agente | Qué recibe |
 |---|---|
 | **Claude Code** | El plugin `inkwell` de este mismo repositorio, que es su propio marketplace (`claude plugin marketplace add KikeDeAlba/inkwell` + `claude plugin install inkwell@inkwell`); si ya existía, se actualiza. Trae la skill. Con el plugin instalado se quita la skill suelta que versiones anteriores enlazaron en `~/.claude/skills`, y se mantienen en `~/.claude/settings.json` los permisos de solo lectura de `inkwell` y el MCP de draw.io a nivel de usuario (`--no-drawio` lo omite; si otra herramienta, como bita, ya lo registró, no se quita). |
-| **opencode, Codex y Gemini CLI** | La skill con sus archivos de apoyo y el MCP de draw.io (`--no-drawio` lo omite). |
+| **opencode** | La skill con sus archivos de apoyo y el MCP de draw.io (`--no-drawio` lo omite). |
+| **Codex y Gemini CLI** | Lo mismo, más los hooks del autodoc: `PreCompact` y `SessionEnd` en Codex (`~/.codex/hooks.json`), `PreCompress` y `SessionEnd` en la extensión de Gemini; ambos corren `inkwell hook session-end --harness <agente>`. La primera vez que abras Codex después de `setup`, te pide confiar en los hooks nuevos; mientras no los apruebes, no corren. |
+| **Antigravity CLI** (`agy`) | Un plugin con la skill y una regla `always_on` de dos líneas que manda a la skill; el MCP de draw.io va en `~/.gemini/config/mcp_config.json`. `agy` no tiene hooks, así que no hay autodoc. |
+| **Claude Desktop** | Nada: no carga skills ni corre la CLI, así que el paso sale `skipped`. |
 
 Si `claude` no está en el PATH, `setup` lo avisa con los comandos para
 instalar el plugin a mano y deja la instalación anterior como estaba.
@@ -213,9 +216,11 @@ apaga.
 
 ## Autodoc
 
-Al cerrar (o compactar) una sesión de Claude Code, el plugin corre
-`inkwell hook session-end`, que lanza en segundo plano una revisión de la
-conversación con un modelo pequeño (`haiku` por omisión) y sale de inmediato.
+Al cerrar (o compactar) una sesión de Claude Code, Codex o Gemini CLI, su hook
+corre `inkwell hook session-end`, que lanza en segundo plano una revisión de la
+conversación con un agente sin interfaz (Claude con `haiku` por omisión) y sale
+de inmediato. Dentro de un agente lanzado sin interfaz (`KIT_HEADLESS=1`, que
+kit pone a todo agente headless) el hook no hace nada.
 Esa revisión:
 
 - Ubica el espacio de la sesión por el repositorio donde se trabajó: primero
@@ -237,8 +242,11 @@ Esa revisión:
   secreto (llaves, tokens, contraseñas, credenciales en URLs, tarjetas), y
   descarta toda acción que todavía traiga uno, o que traiga imágenes, HTML o
   enlaces que no sean `http(s)`, relativos o `#ancla`.
-- El modelo corre sin herramientas (`--tools ""`), en una carpeta temporal
-  vacía, con un entorno mínimo y `CLAUDE_CODE_SAFE_MODE=1`. Recibe el árbol del
+- El agente corre con `runHeadless` de kit en modo de solo lectura (no
+  necesita escribir: inkwell aplica las acciones que devuelve), en una carpeta
+  temporal vacía y con un entorno mínimo. Claude, además, corre sin
+  herramientas (`--disallowedTools Read,Grep,Glob`), sin MCP, sin los ajustes
+  del usuario y con `CLAUDE_CODE_SAFE_MODE=1`. Recibe el árbol del
   espacio y el contenido (recortado) de las páginas que tienen que ver con la
   sesión. Un cambio a una página puede reescribir una sección, agregar una
   nueva después de otra, o reescribir la página completa.
@@ -264,7 +272,9 @@ en Windows); estos son los valores por omisión:
 {
   "autodoc": {
     "enabled": true,
-    "model": "haiku",
+    "agent": "claude",
+    "model": null,
+    "models": {},
     "maxChars": 40000,
     "minChars": 600,
     "maxActions": 5,
@@ -273,8 +283,23 @@ en Windows); estos son los valores por omisión:
 }
 ```
 
-Para apagarlo, `"enabled": false`, o `INKWELL_NO_AUTODOC=1` en el entorno de
-Claude Code. `INKWELL_CLAUDE_BIN` cambia el binario de `claude` que usa.
+`agent` es uno de `claude`, `codex`, `gemini`, `antigravity` u `opencode`. Si
+no está instalado se usa el primero que sí (Claude primero) y el log deja una
+línea `warn:agent-fallback-<pedido>-to-<usado>`. `INKWELL_<AGENTE>_BIN` vale
+también para el agente elegido por fallback. `model` es solo de Claude (`haiku`
+si queda vacío). Para los demás se usa `models.<agente>` (por ejemplo
+`"models": { "codex": "gpt-5" }`) y, si no está, el modelo por omisión de ese
+agente.
+
+Cuando el agente falla, el log dice `skip:model-<código>`. Los códigos son los
+mismos que antes: `exit-<n>` (o `exit-signal`), `is-error`, `not-json`,
+`timeout`, `spawn` (no hay agente o no arrancó) y `empty`. Hay uno nuevo,
+`prompt-too-long`, para cuando el sistema rechaza la línea de comandos. Ya no
+existen `too-large` ni `unsafe-argument`: kit arma los argumentos en Windows.
+
+Para apagarlo, `"enabled": false`, o `INKWELL_NO_AUTODOC=1` en el entorno del
+agente. `INKWELL_<AGENTE>_BIN` (`INKWELL_CLAUDE_BIN`, `INKWELL_CODEX_BIN`…)
+cambia el binario de ese agente.
 
 ## Venir desde bita
 

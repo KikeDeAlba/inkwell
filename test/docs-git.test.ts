@@ -142,7 +142,19 @@ test('every page write is one commit holding only its file, with the inkwell tra
   assert.deepEqual(await git.docsStatus(docsRoot), [])
 })
 
-test('concurrent writes in one process and across processes all land, one commit each', async () => {
+test('the docs lock timeout takes a positive override and falls back to the default', () => {
+  assert.equal(git.docsLockTimeout({}), 5_000)
+  assert.equal(git.docsLockTimeout({ [git.DOCS_GIT_LOCK_TIMEOUT_ENV]: '30000' }), 30_000)
+  for (const bad of ['0', '-1', 'x', '1.5']) assert.equal(git.docsLockTimeout({ [git.DOCS_GIT_LOCK_TIMEOUT_ENV]: bad }), 5_000, bad)
+})
+
+test('concurrent writes in one process and across processes all land, one commit each', async (t) => {
+  const previous = process.env[git.DOCS_GIT_LOCK_TIMEOUT_ENV]
+  process.env[git.DOCS_GIT_LOCK_TIMEOUT_ENV] = '60000'
+  t.after(() => {
+    if (previous === undefined) delete process.env[git.DOCS_GIT_LOCK_TIMEOUT_ENV]
+    else process.env[git.DOCS_GIT_LOCK_TIMEOUT_ENV] = previous
+  })
   const { ctx, docsRoot, db, page } = memoryContext('concurrent')
   await git.initDocsRepo(docsRoot)
   const ids = Array.from({ length: 8 }, (_, index) => page(`Página ${index}`, `pagina-${index}`))

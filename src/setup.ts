@@ -54,6 +54,21 @@ export function manifest(bin: readonly string[] = binCommand()): ToolManifest {
 
 export const DRAWIO_MCP: agents.McpServer = { name: 'drawio', command: ['npx', '-y', '@drawio/mcp'] }
 
+export const ANTIGRAVITY_RULES_FILE = path.join(PACKAGE_ROOT, 'assets', 'antigravity-rules.md')
+
+export const SESSION_END_COMMAND = 'inkwell hook session-end'
+
+export const HOOK_NAME = 'inkwell-autodoc'
+
+function sessionEndHook(harness: 'codex' | 'gemini', timeout: number): agents.HookGroup[] {
+  const command = `${SESSION_END_COMMAND} --harness ${harness}`
+  return [{ hooks: [harness === 'gemini' ? { type: 'command', name: HOOK_NAME, command, timeout } : { type: 'command', command, timeout }] }]
+}
+
+export const CODEX_HOOKS: agents.HookMap = { PreCompact: sessionEndHook('codex', 5), SessionEnd: sessionEndHook('codex', 5) }
+
+export const GEMINI_HOOKS: agents.HookMap = { PreCompress: sessionEndHook('gemini', 5000), SessionEnd: sessionEndHook('gemini', 5000) }
+
 export function integration(options: { drawio?: boolean } = {}): agents.AgentIntegration {
   return {
     tool: 'inkwell',
@@ -61,6 +76,9 @@ export function integration(options: { drawio?: boolean } = {}): agents.AgentInt
     description: 'Living technical documentation through inkwell',
     skills: [{ name: 'inkwell', dir: path.join(PACKAGE_ROOT, 'skills', 'inkwell') }],
     mcp: options.drawio === false ? [] : [DRAWIO_MCP],
+    codex: { hooks: CODEX_HOOKS },
+    gemini: { hooks: GEMINI_HOOKS },
+    antigravity: { rules: ANTIGRAVITY_RULES_FILE },
     claude: {
       permissions: {
         allow: [

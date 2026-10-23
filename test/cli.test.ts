@@ -5,7 +5,9 @@ import { test } from 'node:test'
 import { assertConformance } from '@kikedealba/kit/conformance'
 import { readManifest } from '@kikedealba/kit/registry'
 import { platformContext } from '@kikedealba/kit/platform'
-import { CAPABILITIES, manifest } from '../src/setup.ts'
+import { agents } from '@kikedealba/kit'
+import { ANTIGRAVITY_RULES_FILE, CAPABILITIES, integration, manifest } from '../src/setup.ts'
+import { HELP } from '../src/cli/router.ts'
 import { BIN, registerFakeBita, sandbox } from './helpers/sandbox.ts'
 
 const ENTRY = {
@@ -48,8 +50,26 @@ test('setup registers the manifest with the bita subscription and installs the s
   assert.ok(data.steps.some((step: { agent: string }) => step.agent === 'gemini'))
   assert.equal(data.steps.some((step: { agent: string }) => step.agent === 'claude'), false)
 
+  const codexHooks = JSON.parse(readFileSync(join(box.dir, '.codex', 'hooks.json'), 'utf8')).hooks
+  for (const event of ['PreCompact', 'SessionEnd']) assert.equal(codexHooks[event][0].hooks[0].command, 'inkwell hook session-end --harness codex', event)
+  const geminiHooks = JSON.parse(readFileSync(join(box.dir, '.gemini', 'extensions', 'inkwell', 'hooks', 'hooks.json'), 'utf8')).hooks
+  for (const event of ['PreCompress', 'SessionEnd']) assert.equal(geminiHooks[event][0].hooks[0].command, 'inkwell hook session-end --harness gemini', event)
+
   const removed = box.ok('uninstall')
   assert.equal(removed.unregistered, true)
+  const left = JSON.parse(readFileSync(join(box.dir, '.codex', 'hooks.json'), 'utf8')).hooks
+  assert.equal(left['PreCompact'], undefined)
+  assert.equal(left['SessionEnd'], undefined)
+})
+
+test('every kit agent is offered, antigravity gets a short always-on rule, and claude desktop gets nothing', () => {
+  for (const agent of agents.AGENTS) assert.ok(HELP.includes(agent), agent)
+  const tools = integration()
+  assert.equal(tools.antigravity?.rules, ANTIGRAVITY_RULES_FILE)
+  const rule = readFileSync(ANTIGRAVITY_RULES_FILE, 'utf8').trim().split('\n')
+  assert.ok(rule.length >= 1 && rule.length <= 4)
+  assert.match(rule.join(' '), /skill `inkwell`/)
+  assert.equal(tools.claudeDesktop, undefined)
 })
 
 test('spaces, pages, links and backlog work from the CLI, and --space is an alias of --project', (t) => {
