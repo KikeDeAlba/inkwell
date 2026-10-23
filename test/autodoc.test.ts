@@ -12,7 +12,8 @@ import { claimSession, sessionLockPath, setAside } from '../src/autodoc/lock.ts'
 import { readdirSync } from 'node:fs'
 import { redactSensitive, sensitiveContent } from '../src/autodoc/sensitive.ts'
 import { advanceAutodocCursor, autodocCursor } from '../src/db/autodoc-runs.ts'
-import { binEnvVar, modelArguments, modelExtras, modelFor, parseActions, resolveAgent } from '../src/autodoc/model.ts'
+import { agents } from '@kikedealba/kit'
+import { binEnvVar, failureOf, modelArguments, modelExtras, modelFor, parseActions, resolveAgent } from '../src/autodoc/model.ts'
 import { configPath, loadAutodocConfig } from '../src/autodoc/config.ts'
 import { stripTags, transcriptFrom, turnText } from '../src/autodoc/transcript.ts'
 import { spaceForRepoSlug } from '../src/autodoc/space.ts'
@@ -230,9 +231,28 @@ test('codex and gemini transcripts read as plain user and assistant turns', () =
   const raw = `${gemini.join('\n')}\n`
   assert.equal(transcriptFrom(raw, 0).text, 'USER: ¿Cómo concilia?\n\nASSISTANT: Con la cola.\n\n')
   assert.equal(transcriptFrom(raw, 5).text, '')
+
+  const toolFirst = [
+    line({ id: 'e', type: 'gemini', content: '', toolCalls: [{ name: 'read_file' }] }),
+    line({ id: 'e', type: 'gemini', content: 'Leí el archivo.', toolCalls: [{ name: 'read_file' }] }),
+    line({ id: 'e', type: 'gemini', content: 'Leí el archivo.', tokens: { total: 2 } }),
+  ]
+  assert.equal(transcriptFrom(`${toolFirst.join('\n')}\n`, 0).text, 'ASSISTANT: Leí el archivo.\n\n')
+  assert.equal(transcriptFrom(`${toolFirst.join('\n')}\n`, 1).text, 'ASSISTANT: Leí el archivo.\n\n')
 })
 
-test('an agent that cannot run falls back to the first one installed, and a bad override is not replaced', async (t) => {
+test('kit failures keep the log codes autodoc wrote before', () => {
+  const code = (error: agents.HeadlessError) => failureOf(error).message
+  assert.equal(code(new agents.HeadlessError('FAILED', 'claude', 'x', { exitCode: 1 })), 'exit-1')
+  assert.equal(code(new agents.HeadlessError('FAILED', 'claude', 'x', { exitCode: null })), 'exit-signal')
+  assert.equal(code(new agents.HeadlessError('FAILED', 'claude', 'x', { exitCode: 0 })), 'is-error')
+  assert.equal(code(new agents.HeadlessError('PARSE', 'claude', 'x', { exitCode: 0 })), 'not-json')
+  assert.equal(code(new agents.HeadlessError('TIMEOUT', 'codex', 'x')), 'timeout')
+  assert.equal(code(new agents.HeadlessError('UNAVAILABLE', 'codex', 'x')), 'spawn')
+  assert.equal(code(new agents.HeadlessError('PROMPT_TOO_LONG', 'antigravity', 'x')), 'prompt-too-long')
+})
+
+test('an agent that cannot run falls back to the first one installed, and the overrides apply to the fallback too', async (t) => {
   const box = sandbox(t)
   const dir = join(box.dir, 'bin')
   mkdirSync(dir, { recursive: true })
@@ -245,7 +265,13 @@ test('an agent that cannot run falls back to the first one installed, and a bad 
   assert.equal(picked.fallback, true)
   assert.equal(realpathSync(picked.bin), realpathSync(claude))
   assert.deepEqual(await resolveAgent('claude', env), { agent: 'claude', bin: picked.bin, fallback: false })
-  await assert.rejects(resolveAgent('codex', { ...env, INKWELL_CODEX_BIN: join(dir, 'missing') }), /unavailable/)
+  const other = join(box.dir, 'other')
+  mkdirSync(other, { recursive: true })
+  const opencode = nodeLauncher(other, 'opencode', script)
+  const missing = join(dir, 'missing')
+  const viaOverride = await resolveAgent('vim', { ...env, PATH: other, INKWELL_OPENCODE_BIN: opencode, INKWELL_CLAUDE_BIN: missing, INKWELL_CODEX_BIN: missing, INKWELL_GEMINI_BIN: missing, INKWELL_ANTIGRAVITY_BIN: missing })
+  assert.equal(viaOverride.fallback, true)
+  assert.equal(realpathSync(viaOverride.bin), realpathSync(opencode))
 })
 
 test('autodoc runs on the agent from the config, without the claude model or flags', (t) => {
@@ -281,10 +307,11 @@ test('actions come from the outermost JSON array, and claude runs without tools,
   assert.deepEqual(modelArguments('codex'), [])
   assert.equal(modelExtras('codex')['CLAUDE_CODE_SAFE_MODE'], undefined)
   assert.equal(modelExtras('codex')['INKWELL_AUTODOC'], '1')
-  assert.equal(modelFor({ model: null }, { agent: 'claude', fallback: false }), 'haiku')
-  assert.equal(modelFor({ model: null }, { agent: 'codex', fallback: false }), undefined)
-  assert.equal(modelFor({ model: 'gpt-5' }, { agent: 'codex', fallback: false }), 'gpt-5')
-  assert.equal(modelFor({ model: 'gpt-5' }, { agent: 'claude', fallback: true }), 'haiku')
+  assert.equal(modelFor({ model: null }, { agent: 'claude' }), 'haiku')
+  assert.equal(modelFor({ model: 'sonnet' }, { agent: 'claude' }), 'sonnet')
+  assert.equal(modelFor({ model: 'sonnet' }, { agent: 'codex' }), undefined)
+  assert.equal(modelFor({ model: 'sonnet', models: { codex: 'gpt-5' } }, { agent: 'codex' }), 'gpt-5')
+  assert.equal(modelFor({ model: null, models: { gemini: 'flash' } }, { agent: 'opencode' }), undefined)
 })
 
 test('backlog and logbook headings are rejected, and titles compare without case or accents', () => {
@@ -297,11 +324,12 @@ test('backlog and logbook headings are rejected, and titles compare without case
 
 test('the autodoc config falls back to its defaults and reads the autodoc block', (t) => {
   const box = sandbox(t)
-  assert.deepEqual(loadAutodocConfig(box.env), { enabled: true, agent: 'claude', model: null, maxChars: 40000, minChars: 600, maxActions: 5, timeoutSeconds: 240 })
-  writeConfig(box, { enabled: false, agent: 'codex', model: 'sonnet', maxActions: 2 })
+  assert.deepEqual(loadAutodocConfig(box.env), { enabled: true, agent: 'claude', model: null, models: {}, maxChars: 40000, minChars: 600, maxActions: 5, timeoutSeconds: 240 })
+  writeConfig(box, { enabled: false, agent: 'codex', model: 'sonnet', models: { codex: 'gpt-5', gemini: '', bad: 3 }, maxActions: 2 })
   const config = loadAutodocConfig(box.env)
   assert.equal(config.enabled, false)
   assert.equal(config.agent, 'codex')
+  assert.deepEqual(config.models, { codex: 'gpt-5' })
   assert.equal(config.model, 'sonnet')
   assert.equal(config.maxActions, 2)
   assert.equal(config.minChars, 600)

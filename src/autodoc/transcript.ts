@@ -128,11 +128,11 @@ export function transcriptFrom(raw: string, skipLines: number): TranscriptSlice 
     const entry = parseLine(line)
     const turn = entry === null ? null : turnOf(entry)
     const repeated = turn?.id !== undefined && seen.has(turn.id)
-    if (turn?.id !== undefined) seen.add(turn.id)
+    const rendered = turn === null || repeated ? null : render(turn)
+    if (rendered !== null && turn?.id !== undefined) seen.add(turn.id)
     if (index < skipLines) return
     fresh += 1
     if (entry === null) invalid += 1
-    const rendered = turn === null || repeated ? null : render(turn)
     if (rendered !== null) text += `${rendered}\n\n`
   })
   return { text, lines: lines.length, fresh, invalid }

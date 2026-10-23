@@ -23,7 +23,7 @@ export const CLAUDE_MODEL_ENV: Readonly<Record<string, string>> = {
   CLAUDE_CODE_SAFE_MODE: '1',
 }
 
-export type ModelFailure = 'unavailable' | 'failed' | 'timeout' | 'parse' | 'prompt-too-long' | 'empty'
+export type ModelFailure = 'spawn' | 'timeout' | 'exit' | 'is-error' | 'not-json' | 'empty' | 'prompt-too-long'
 
 export class ModelError extends Error {
   readonly reason: ModelFailure
@@ -39,6 +39,7 @@ export interface ModelCall {
   prompt: string
   agent: string
   model: string | null
+  models?: Readonly<Record<string, string>>
   timeoutSeconds: number
 }
 
@@ -60,21 +61,21 @@ export function binEnvVar(agent: string): string {
 
 export async function resolveAgent(preferred: string, env: NodeJS.ProcessEnv = process.env): Promise<PickedAgent> {
   const ctx = platformContext({ env })
-  const override = env[binEnvVar(preferred)]
-  if (override !== undefined && override.length > 0) {
-    if (!agents.isHeadlessAgent(preferred)) throw new ModelError('unavailable')
-    const bin = await agents.findAgentBinary(preferred, { ctx, override })
-    if (bin === null) throw new ModelError('unavailable')
-    return { agent: preferred, bin, fallback: false }
+  const order = [preferred, ...agents.HEADLESS_AGENTS.filter((agent) => agent !== preferred)]
+  for (const agent of order) {
+    if (!agents.isHeadlessAgent(agent)) continue
+    const override = env[binEnvVar(agent)]
+    const bin = await agents.findAgentBinary(agent, { ctx, ...(override !== undefined && override.length > 0 ? { override } : {}) })
+    if (bin !== null) return { agent, bin, fallback: agent !== preferred }
   }
-  const picked = await agents.pickHeadlessAgent(preferred as agents.HeadlessAgent, { ctx })
-  if (picked === null) throw new ModelError('unavailable')
-  return picked
+  throw new ModelError('spawn')
 }
 
-export function modelFor(call: Pick<ModelCall, 'model'>, picked: Pick<PickedAgent, 'agent' | 'fallback'>): string | undefined {
-  if (call.model !== null && !picked.fallback) return call.model
-  return DEFAULT_MODELS[picked.agent]
+export function modelFor(call: Pick<ModelCall, 'model' | 'models'>, picked: Pick<PickedAgent, 'agent'>): string | undefined {
+  const specific = call.models?.[picked.agent]
+  if (specific !== undefined) return specific
+  if (picked.agent === 'claude') return call.model ?? DEFAULT_MODELS.claude
+  return undefined
 }
 
 export function modelArguments(agent: agents.HeadlessAgent): string[] {
@@ -85,12 +86,13 @@ export function modelExtras(agent: agents.HeadlessAgent): Record<string, string>
   return agent === 'claude' ? { ...MODEL_ENV, ...CLAUDE_MODEL_ENV } : { ...MODEL_ENV }
 }
 
-const FAILURES: Record<agents.HeadlessErrorCode, ModelFailure> = {
-  UNAVAILABLE: 'unavailable',
-  FAILED: 'failed',
-  TIMEOUT: 'timeout',
-  PARSE: 'parse',
-  PROMPT_TOO_LONG: 'prompt-too-long',
+export function failureOf(error: agents.HeadlessError): ModelError {
+  if (error.code === 'UNAVAILABLE') return new ModelError('spawn')
+  if (error.code === 'TIMEOUT') return new ModelError('timeout')
+  if (error.code === 'PARSE') return new ModelError('not-json')
+  if (error.code === 'PROMPT_TOO_LONG') return new ModelError('prompt-too-long')
+  if (error.exitCode === 0) return new ModelError('is-error')
+  return new ModelError('exit', `exit-${error.exitCode ?? 'signal'}`)
 }
 
 let active: AbortController | null = null
@@ -126,7 +128,7 @@ export async function runModel(call: ModelCall, env: NodeJS.ProcessEnv = process
     if (result.text.trim().length === 0) throw new ModelError('empty')
     return { text: result.text, agent: picked.agent, fallback: picked.fallback }
   } catch (error) {
-    if (error instanceof agents.HeadlessError) throw new ModelError(FAILURES[error.code] ?? 'failed')
+    if (error instanceof agents.HeadlessError) throw failureOf(error)
     throw error
   } finally {
     active = null

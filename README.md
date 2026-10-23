@@ -42,7 +42,7 @@ eventos de bita) y prepara a cada agente:
 |---|---|
 | **Claude Code** | El plugin `inkwell` de este mismo repositorio, que es su propio marketplace (`claude plugin marketplace add KikeDeAlba/inkwell` + `claude plugin install inkwell@inkwell`); si ya existía, se actualiza. Trae la skill. Con el plugin instalado se quita la skill suelta que versiones anteriores enlazaron en `~/.claude/skills`, y se mantienen en `~/.claude/settings.json` los permisos de solo lectura de `inkwell` y el MCP de draw.io a nivel de usuario (`--no-drawio` lo omite; si otra herramienta, como bita, ya lo registró, no se quita). |
 | **opencode** | La skill con sus archivos de apoyo y el MCP de draw.io (`--no-drawio` lo omite). |
-| **Codex y Gemini CLI** | Lo mismo, más los hooks del autodoc: `PreCompact` y `SessionEnd` en Codex (`~/.codex/hooks.json`), `PreCompress` y `SessionEnd` en la extensión de Gemini; ambos corren `inkwell hook session-end --harness <agente>`. Codex puede pedir que apruebes los hooks nuevos la primera vez. |
+| **Codex y Gemini CLI** | Lo mismo, más los hooks del autodoc: `PreCompact` y `SessionEnd` en Codex (`~/.codex/hooks.json`), `PreCompress` y `SessionEnd` en la extensión de Gemini; ambos corren `inkwell hook session-end --harness <agente>`. La primera vez que abras Codex después de `setup`, te pide confiar en los hooks nuevos; mientras no los apruebes, no corren. |
 | **Antigravity CLI** (`agy`) | Un plugin con la skill y una regla `always_on` de dos líneas que manda a la skill; el MCP de draw.io va en `~/.gemini/config/mcp_config.json`. `agy` no tiene hooks, así que no hay autodoc. |
 | **Claude Desktop** | Nada: no carga skills ni corre la CLI, así que el paso sale `skipped`. |
 
@@ -274,6 +274,7 @@ en Windows); estos son los valores por omisión:
     "enabled": true,
     "agent": "claude",
     "model": null,
+    "models": {},
     "maxChars": 40000,
     "minChars": 600,
     "maxActions": 5,
@@ -284,9 +285,17 @@ en Windows); estos son los valores por omisión:
 
 `agent` es uno de `claude`, `codex`, `gemini`, `antigravity` u `opencode`. Si
 no está instalado se usa el primero que sí (Claude primero) y el log deja una
-línea `warn:agent-fallback-<pedido>-to-<usado>`. `model` vacío deja `haiku` en
-Claude y el modelo por omisión en los demás; un `model` propio no se pasa
-cuando hubo fallback.
+línea `warn:agent-fallback-<pedido>-to-<usado>`. `INKWELL_<AGENTE>_BIN` vale
+también para el agente elegido por fallback. `model` es solo de Claude (`haiku`
+si queda vacío). Para los demás se usa `models.<agente>` (por ejemplo
+`"models": { "codex": "gpt-5" }`) y, si no está, el modelo por omisión de ese
+agente.
+
+Cuando el agente falla, el log dice `skip:model-<código>`. Los códigos son los
+mismos que antes: `exit-<n>` (o `exit-signal`), `is-error`, `not-json`,
+`timeout`, `spawn` (no hay agente o no arrancó) y `empty`. Hay uno nuevo,
+`prompt-too-long`, para cuando el sistema rechaza la línea de comandos. Ya no
+existen `too-large` ni `unsafe-argument`: kit arma los argumentos en Windows.
 
 Para apagarlo, `"enabled": false`, o `INKWELL_NO_AUTODOC=1` en el entorno del
 agente. `INKWELL_<AGENTE>_BIN` (`INKWELL_CLAUDE_BIN`, `INKWELL_CODEX_BIN`…)

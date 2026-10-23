@@ -87,7 +87,7 @@ export async function runAutodoc(request: AutodocRequest): Promise<AutodocResult
     const tree = await spaceTree(ctx.db, ctx.docsRoot, space.id)
     const candidates = await candidatePages(ctx.db, ctx.docsRoot, space.id, tree, conversation, resolved.repoSlug)
     const prompt = await buildPrompt({ spaceName: space.name, tree, candidates, conversation, maxActions: config.maxActions })
-    const call: ModelCall = { prompt, agent: config.agent, model: config.model, timeoutSeconds: config.timeoutSeconds }
+    const call: ModelCall = { prompt, agent: config.agent, model: config.model, models: config.models, timeoutSeconds: config.timeoutSeconds }
 
     let answer: string
     try {
