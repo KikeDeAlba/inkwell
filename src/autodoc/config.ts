@@ -4,7 +4,8 @@ import { platformContext, toolDirs } from '@kikedealba/kit/platform'
 
 export interface AutodocConfig {
   enabled: boolean
-  model: string
+  agent: string
+  model: string | null
   maxChars: number
   minChars: number
   maxActions: number
@@ -13,7 +14,8 @@ export interface AutodocConfig {
 
 export const AUTODOC_DEFAULTS: AutodocConfig = {
   enabled: true,
-  model: 'haiku',
+  agent: 'claude',
+  model: null,
   maxChars: 40_000,
   minChars: 600,
   maxActions: 5,
@@ -22,6 +24,10 @@ export const AUTODOC_DEFAULTS: AutodocConfig = {
 
 export function configPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(toolDirs('inkwell', platformContext({ env })).config, 'config.json')
+}
+
+function nonEmpty(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
 }
 
 function positive(value: unknown, fallback: number): number {
@@ -38,10 +44,10 @@ export function loadAutodocConfig(env: NodeJS.ProcessEnv = process.env): Autodoc
   const root = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
   const block = root['autodoc']
   const autodoc = block !== null && typeof block === 'object' && !Array.isArray(block) ? (block as Record<string, unknown>) : {}
-  const model = autodoc['model']
   return {
     enabled: autodoc['enabled'] !== false,
-    model: typeof model === 'string' && model.trim().length > 0 ? model.trim() : AUTODOC_DEFAULTS.model,
+    agent: nonEmpty(autodoc['agent']) ?? AUTODOC_DEFAULTS.agent,
+    model: nonEmpty(autodoc['model']) ?? AUTODOC_DEFAULTS.model,
     maxChars: positive(autodoc['maxChars'], AUTODOC_DEFAULTS.maxChars),
     minChars: positive(autodoc['minChars'], AUTODOC_DEFAULTS.minChars),
     maxActions: positive(autodoc['maxActions'], AUTODOC_DEFAULTS.maxActions),

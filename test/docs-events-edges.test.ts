@@ -7,8 +7,9 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { test } from 'node:test'
 import { defineManifest, registerTool } from '@kikedealba/kit/registry'
 import { platformContext } from '@kikedealba/kit/platform'
-import { MODEL_ENV } from '../src/autodoc/claude.ts'
-import { modelEnvironment, runEnvironment } from '../src/autodoc/env.ts'
+import { agents } from '@kikedealba/kit'
+import { modelExtras } from '../src/autodoc/model.ts'
+import { runEnvironment } from '../src/autodoc/env.ts'
 import { findMapByPage } from '../src/db/confluence-map.ts'
 import { openMemoryDatabase } from '../src/db/open.ts'
 import { listPages, requirePage } from '../src/db/pages.ts'
@@ -18,7 +19,7 @@ import { setDocsEventSink, type DocsChangedEvent, type DocsChangeKind } from '..
 import { initDocsRepo } from '../src/docs/git.ts'
 import { recordPageDoc } from '../src/docs/page-record.ts'
 import { FakeConfluence } from './helpers/fake-confluence.ts'
-import { sandbox, type Sandbox } from './helpers/sandbox.ts'
+import { nodeLauncher, sandbox, type Sandbox } from './helpers/sandbox.ts'
 import { DatabaseSync } from 'node:sqlite'
 
 interface Captured {
@@ -135,7 +136,7 @@ const answer = JSON.parse(readFileSync(${JSON.stringify(answerFile)}, 'utf8'))
 process.stdout.write(JSON.stringify({ type: 'result', result: JSON.stringify(answer), is_error: false }))
 `,
   )
-  box.env['INKWELL_CLAUDE_BIN'] = script
+  box.env['INKWELL_CLAUDE_BIN'] = nodeLauncher(dir, 'claude', script)
   return {
     answer: (result) => writeFileSync(answerFile, JSON.stringify(result)),
     envKeys: () => (existsSync(callsFile) ? readFileSync(callsFile, 'utf8').trim().split('\n').map((line) => JSON.parse(line).noEvents) : []),
@@ -261,8 +262,10 @@ test('autodoc propose commits only to its branch, so the main docs emit nothing 
 })
 
 test('the model child is always silenced, even when the parent environment tries to turn events on, and the run process keeps what it got', () => {
-  assert.equal(modelEnvironment({ KIT_NO_EVENTS: '', PATH: '/bin' }, MODEL_ENV)['KIT_NO_EVENTS'], '1')
-  assert.equal(modelEnvironment({ PATH: '/bin' }, MODEL_ENV)['KIT_NO_EVENTS'], '1')
+  for (const agent of agents.HEADLESS_AGENTS) {
+    assert.equal(agents.headlessEnvironment(agent, { KIT_NO_EVENTS: '', PATH: '/bin' }, modelExtras(agent))['KIT_NO_EVENTS'], '1')
+    assert.equal(agents.headlessEnvironment(agent, { PATH: '/bin' }, modelExtras(agent))['KIT_NO_EVENTS'], '1')
+  }
   assert.equal(runEnvironment({ PATH: '/bin' }, { INKWELL_AUTODOC: '1' })['KIT_NO_EVENTS'], undefined)
   assert.equal(runEnvironment({ KIT_NO_EVENTS: '1' }, { INKWELL_AUTODOC: '1' })['KIT_NO_EVENTS'], '1')
 })

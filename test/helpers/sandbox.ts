@@ -1,9 +1,21 @@
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 export const BIN = join(import.meta.dirname, '..', '..', 'src', 'bin', 'inkwell.ts')
+
+export function nodeLauncher(dir: string, name: string, script: string): string {
+  if (process.platform === 'win32') {
+    const file = join(dir, `${name}.cmd`)
+    writeFileSync(file, `@echo off\r\n"${process.execPath}" "${script}" %*\r\n`)
+    return file
+  }
+  const file = join(dir, name)
+  writeFileSync(file, `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`)
+  chmodSync(file, 0o755)
+  return file
+}
 
 export interface Sandbox {
   dir: string

@@ -2,7 +2,7 @@ import type { DocsContext } from '../docs/context.ts'
 import { advanceAutodocCursor, autodocCursor } from '../db/autodoc-runs.ts'
 import type { BitaRepoLookup } from '../integrations/bita-projects.ts'
 import { AutodocWriter, describeOutcome, sessionTag, type Outcome, type ShownPage } from './actions.ts'
-import { ModelError, parseActions, resultText, runModel, type ModelCall } from './claude.ts'
+import { ModelError, parseActions, runModel, type ModelAnswer, type ModelCall } from './model.ts'
 import type { AutodocConfig } from './config.ts'
 import { claimSession } from './lock.ts'
 import { buildPrompt, candidatePages, spaceTree } from './prompt.ts'
@@ -19,7 +19,7 @@ export interface AutodocRequest {
   lockDir: string
   env?: NodeJS.ProcessEnv
   lookup?: BitaRepoLookup
-  model?: (call: ModelCall) => Promise<string>
+  model?: (call: ModelCall) => Promise<ModelAnswer>
   log?: (line: string) => void
 }
 
@@ -39,6 +39,8 @@ export interface AutodocResult {
   chars: number
   outcomes: Outcome[]
   cursor: number
+  agent: string | null
+  fallback: boolean
 }
 
 function defaultLog(line: string): void {
@@ -54,9 +56,10 @@ export async function runAutodoc(request: AutodocRequest): Promise<AutodocResult
   const env = request.env ?? process.env
   const log = request.log ?? defaultLog
   let spaceKey: string | null = null
+  let used: Pick<ModelAnswer, 'agent' | 'fallback'> | null = null
   const finish = (status: AutodocStatus, chars: number, summary: string, outcomes: Outcome[] = []): AutodocResult => {
     log(logLine(sessionId, spaceKey, chars, summary))
-    return { status, chars, outcomes, cursor: autodocCursor(ctx.db, sessionId) }
+    return { status, chars, outcomes, cursor: autodocCursor(ctx.db, sessionId), agent: used?.agent ?? null, fallback: used?.fallback ?? false }
   }
 
   if (!config.enabled) return finish('disabled', 0, 'skip:disabled')
@@ -84,11 +87,14 @@ export async function runAutodoc(request: AutodocRequest): Promise<AutodocResult
     const tree = await spaceTree(ctx.db, ctx.docsRoot, space.id)
     const candidates = await candidatePages(ctx.db, ctx.docsRoot, space.id, tree, conversation, resolved.repoSlug)
     const prompt = await buildPrompt({ spaceName: space.name, tree, candidates, conversation, maxActions: config.maxActions })
-    const call: ModelCall = { prompt, model: config.model, timeoutSeconds: config.timeoutSeconds }
+    const call: ModelCall = { prompt, agent: config.agent, model: config.model, timeoutSeconds: config.timeoutSeconds }
 
     let answer: string
     try {
-      answer = resultText(await (request.model ?? ((next: ModelCall) => runModel(next, env)))(call))
+      const reply = await (request.model ?? ((next: ModelCall) => runModel(next, env)))(call)
+      used = { agent: reply.agent, fallback: reply.fallback }
+      if (reply.fallback) log(logLine(sessionId, spaceKey, chars, `warn:agent-fallback-${config.agent}-to-${reply.agent}`))
+      answer = reply.text
     } catch (error) {
       if (!(error instanceof ModelError)) throw error
       return finish('model-failed', chars, `skip:model-${error.message}`)
