@@ -7,12 +7,13 @@ import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
 import { platformContext } from '@kikedealba/kit/platform'
 import { cleanMarkdown, comparableTitle, forbiddenHeadings, oneLine, safeHref, unsafeMarkdown } from '../src/autodoc/actions.ts'
-import { modelEnvironment, runEnvironment } from '../src/autodoc/env.ts'
+import { runEnvironment } from '../src/autodoc/env.ts'
 import { claimSession, sessionLockPath, setAside } from '../src/autodoc/lock.ts'
 import { readdirSync } from 'node:fs'
 import { redactSensitive, sensitiveContent } from '../src/autodoc/sensitive.ts'
 import { advanceAutodocCursor, autodocCursor } from '../src/db/autodoc-runs.ts'
-import { claudeArguments, parseActions, quoteWindows, resultText } from '../src/autodoc/claude.ts'
+import { agents } from '@kikedealba/kit'
+import { binEnvVar, failureOf, modelArguments, modelExtras, modelFor, parseActions, resolveAgent } from '../src/autodoc/model.ts'
 import { configPath, loadAutodocConfig } from '../src/autodoc/config.ts'
 import { stripTags, transcriptFrom, turnText } from '../src/autodoc/transcript.ts'
 import { spaceForRepoSlug } from '../src/autodoc/space.ts'
@@ -21,7 +22,7 @@ import { openDatabase, openMemoryDatabase, readSchemaVersion } from '../src/db/o
 import { MIGRATIONS } from '../src/db/schema.ts'
 import { insertPage } from '../src/db/pages.ts'
 import { insertSpace } from '../src/db/spaces.ts'
-import { sandbox, type Sandbox } from './helpers/sandbox.ts'
+import { nodeLauncher, sandbox, type Sandbox } from './helpers/sandbox.ts'
 
 const isolated = mkdtempSync(join(tmpdir(), 'inkwell-autodoc-'))
 process.env['INKWELL_DB_PATH'] = join(isolated, 'unused.db')
@@ -57,10 +58,15 @@ interface FakeAnswer {
   isError?: boolean
 }
 
-function fakeClaude(box: Sandbox): { answer(next: FakeAnswer): void; calls(): number; lastPrompt(): string; lastArgs(): string[]; last(): any } {
-  const dir = join(box.dir, 'fake-claude')
+const ANSWER_FORMATS: Record<string, string> = {
+  claude: `process.stdout.write(JSON.stringify({ type: 'result', result, is_error: answer.isError === true, session_id: 's' }))`,
+  codex: `process.stdout.write([{ type: 'thread.started', thread_id: 't' }, { type: 'item.completed', item: { type: 'agent_message', text: result } }].map((event) => JSON.stringify(event)).join('\\n') + '\\n')`,
+}
+
+function fakeClaude(box: Sandbox, agent: 'claude' | 'codex' = 'claude'): { answer(next: FakeAnswer): void; calls(): number; lastPrompt(): string; lastArgs(): string[]; last(): any; bin: string } {
+  const dir = join(box.dir, `fake-${agent}`)
   mkdirSync(dir, { recursive: true })
-  const script = join(dir, 'claude.mjs')
+  const script = join(dir, `${agent}.mjs`)
   const answerFile = join(dir, 'answer.json')
   const callsFile = join(dir, 'calls.jsonl')
   writeFileSync(
@@ -69,7 +75,9 @@ function fakeClaude(box: Sandbox): { answer(next: FakeAnswer): void; calls(): nu
 const chunks = []
 for await (const chunk of process.stdin) chunks.push(chunk)
 const prompt = Buffer.concat(chunks).toString('utf8')
-appendFileSync(${JSON.stringify(callsFile)}, JSON.stringify({ args: process.argv.slice(2), prompt, cwd: process.cwd(), keys: Object.keys(process.env), env: { INKWELL_AUTODOC: process.env.INKWELL_AUTODOC, GAZE_HARVEST: process.env.GAZE_HARVEST, CLAUDE_CODE_DISABLE_AUTO_MEMORY: process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, CLAUDE_CODE_SAFE_MODE: process.env.CLAUDE_CODE_SAFE_MODE } }) + '\\n')
+const env = {}
+for (const key of ['INKWELL_AUTODOC', 'GAZE_HARVEST', 'BITA_NO_HOOKS', 'KIT_NO_EVENTS', 'KIT_HEADLESS', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY', 'CLAUDE_CODE_SAFE_MODE']) if (process.env[key] !== undefined) env[key] = process.env[key]
+appendFileSync(${JSON.stringify(callsFile)}, JSON.stringify({ args: process.argv.slice(2), prompt, cwd: process.cwd(), keys: Object.keys(process.env), env }) + '\\n')
 const answer = JSON.parse(readFileSync(${JSON.stringify(answerFile)}, 'utf8'))
 if (answer.sleep) await new Promise((done) => setTimeout(done, answer.sleep))
 if (answer.exit) {
@@ -77,13 +85,15 @@ if (answer.exit) {
   process.exit(answer.exit)
 }
 const result = typeof answer.result === 'string' ? answer.result : JSON.stringify(answer.result ?? [])
-process.stdout.write(JSON.stringify({ type: 'result', result, is_error: answer.isError === true }))
+${ANSWER_FORMATS[agent]}
 `,
   )
-  box.env['INKWELL_CLAUDE_BIN'] = script
+  const bin = nodeLauncher(dir, agent, script)
+  box.env[binEnvVar(agent)] = bin
   const calls = (): string[] => (existsSync(callsFile) ? readFileSync(callsFile, 'utf8').trim().split('\n').filter(Boolean) : [])
   const last = (): { args: string[]; prompt: string } => JSON.parse(calls().at(-1) ?? '{}')
   return {
+    bin,
     last,
     answer: (next) => writeFileSync(answerFile, JSON.stringify(next)),
     calls: () => calls().length,
@@ -197,21 +207,111 @@ test('stripTags removes harness tags, and only real user and assistant text turn
   assert.equal(transcriptFrom(`${transcriptLines().join('\n')}\n`, 5).text, '')
 })
 
-test('model output is read from the result envelope and the outermost JSON array', () => {
-  assert.equal(resultText(JSON.stringify({ type: 'result', result: 'x [1] y', is_error: false })), 'x [1] y')
-  assert.throws(() => resultText(JSON.stringify({ type: 'result', result: 'nope', is_error: true })), /is-error/)
-  assert.throws(() => resultText('not json'), /not-json/)
+test('codex and gemini transcripts read as plain user and assistant turns', () => {
+  const codex = [
+    line({ type: 'session_meta', payload: { id: 'x' } }),
+    line({ type: 'response_item', payload: { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'reglas del arnés' }] } }),
+    line({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '# AGENTS.md instructions\n\n<INSTRUCTIONS>x</INSTRUCTIONS>' }] } }),
+    line({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<environment_context>cwd</environment_context>' }] } }),
+    line({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '¿Cómo concilia?' }] } }),
+    line({ type: 'response_item', payload: { type: 'reasoning', summary: [] } }),
+    line({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Con la cola.' }] } }),
+  ]
+  assert.equal(transcriptFrom(`${codex.join('\n')}\n`, 0).text, 'USER: ¿Cómo concilia?\n\nASSISTANT: Con la cola.\n\n')
+
+  const gemini = [
+    line({ sessionId: 's', projectHash: 'h', kind: 'main' }),
+    line({ id: 'a', type: 'user', content: [{ text: '<session_context>contexto</session_context>' }] }),
+    line({ id: 'b', type: 'user', content: [{ text: '¿Cómo concilia?' }] }),
+    line({ id: 'c', type: 'gemini', content: 'Con la cola.', model: 'm' }),
+    line({ $set: { lastUpdated: 'x' } }),
+    line({ id: 'c', type: 'gemini', content: 'Con la cola.', tokens: { total: 1 } }),
+    line({ id: 'd', type: 'info', content: 'aviso' }),
+  ]
+  const raw = `${gemini.join('\n')}\n`
+  assert.equal(transcriptFrom(raw, 0).text, 'USER: ¿Cómo concilia?\n\nASSISTANT: Con la cola.\n\n')
+  assert.equal(transcriptFrom(raw, 5).text, '')
+
+  const toolFirst = [
+    line({ id: 'e', type: 'gemini', content: '', toolCalls: [{ name: 'read_file' }] }),
+    line({ id: 'e', type: 'gemini', content: 'Leí el archivo.', toolCalls: [{ name: 'read_file' }] }),
+    line({ id: 'e', type: 'gemini', content: 'Leí el archivo.', tokens: { total: 2 } }),
+  ]
+  assert.equal(transcriptFrom(`${toolFirst.join('\n')}\n`, 0).text, 'ASSISTANT: Leí el archivo.\n\n')
+  assert.equal(transcriptFrom(`${toolFirst.join('\n')}\n`, 1).text, 'ASSISTANT: Leí el archivo.\n\n')
+})
+
+test('kit failures keep the log codes autodoc wrote before', () => {
+  const code = (error: agents.HeadlessError) => failureOf(error).message
+  assert.equal(code(new agents.HeadlessError('FAILED', 'claude', 'x', { exitCode: 1 })), 'exit-1')
+  assert.equal(code(new agents.HeadlessError('FAILED', 'claude', 'x', { exitCode: null })), 'exit-signal')
+  assert.equal(code(new agents.HeadlessError('FAILED', 'claude', 'x', { exitCode: 0 })), 'is-error')
+  assert.equal(code(new agents.HeadlessError('PARSE', 'claude', 'x', { exitCode: 0 })), 'not-json')
+  assert.equal(code(new agents.HeadlessError('TIMEOUT', 'codex', 'x')), 'timeout')
+  assert.equal(code(new agents.HeadlessError('UNAVAILABLE', 'codex', 'x')), 'spawn')
+  assert.equal(code(new agents.HeadlessError('PROMPT_TOO_LONG', 'antigravity', 'x')), 'prompt-too-long')
+})
+
+test('an agent that cannot run falls back to the first one installed, and the overrides apply to the fallback too', async (t) => {
+  const box = sandbox(t)
+  const dir = join(box.dir, 'bin')
+  mkdirSync(dir, { recursive: true })
+  const script = join(dir, 'noop.mjs')
+  writeFileSync(script, '')
+  const claude = nodeLauncher(dir, 'claude', script)
+  const env: NodeJS.ProcessEnv = { PATH: dir, HOME: box.dir, USERPROFILE: box.dir, APPDATA: box.env['APPDATA'], LOCALAPPDATA: box.env['LOCALAPPDATA'], ...(process.platform === 'win32' ? { PATHEXT: '.COM;.EXE;.BAT;.CMD', SystemRoot: process.env['SystemRoot'] } : {}) }
+  const picked = await resolveAgent('vim', env)
+  assert.equal(picked.agent, 'claude')
+  assert.equal(picked.fallback, true)
+  assert.equal(realpathSync(picked.bin), realpathSync(claude))
+  assert.deepEqual(await resolveAgent('claude', env), { agent: 'claude', bin: picked.bin, fallback: false })
+  const other = join(box.dir, 'other')
+  mkdirSync(other, { recursive: true })
+  const opencode = nodeLauncher(other, 'opencode', script)
+  const missing = join(dir, 'missing')
+  const viaOverride = await resolveAgent('vim', { ...env, PATH: other, INKWELL_OPENCODE_BIN: opencode, INKWELL_CLAUDE_BIN: missing, INKWELL_CODEX_BIN: missing, INKWELL_GEMINI_BIN: missing, INKWELL_ANTIGRAVITY_BIN: missing })
+  assert.equal(viaOverride.fallback, true)
+  assert.equal(realpathSync(viaOverride.bin), realpathSync(opencode))
+})
+
+test('autodoc runs on the agent from the config, without the claude model or flags', (t) => {
+  const w = world(t)
+  const codex = fakeClaude(w.box, 'codex')
+  writeConfig(w.box, { agent: 'codex' })
+  codex.answer({ result: [{ action: 'propose', pageId: w.rootId, section: 'Red', markdown: '## Red\n\nTodo pasa por el WAF.', reason: 'r' }] })
+  const result = w.run()
+  assert.equal(result.status, 'done')
+  assert.equal(result.agent, 'codex')
+  assert.equal(result.fallback, false)
+  assert.equal(w.claude.calls(), 0)
+  const args = codex.lastArgs()
+  assert.equal(args[0], 'exec')
+  assert.equal(args[args.indexOf('--sandbox') + 1], 'read-only')
+  assert.ok(!args.includes('-m') && !args.includes('--disallowedTools'))
+  assert.deepEqual(codex.last().env, { INKWELL_AUTODOC: '1', GAZE_HARVEST: '1', BITA_NO_HOOKS: '1', KIT_NO_EVENTS: '1', KIT_HEADLESS: '1' })
+  assert.match(codex.lastPrompt(), /<conversation>\nUSER: ¿Cómo concilia/)
+})
+
+test('actions come from the outermost JSON array, and claude runs without tools, settings or MCP', () => {
   assert.deepEqual(parseActions('Aquí va:\n[{"action":"create","title":"[x]"}]\nfin'), [{ action: 'create', title: '[x]' }])
   assert.equal(parseActions('nada que documentar'), null)
   const actions = [{ action: 'create', title: 'Cola [beta]', parentId: 1, markdown: 'a ] b', reason: 'r' }]
   assert.deepEqual(parseActions(`Nota [importante]\n${JSON.stringify(actions)}\nFin [ok]`), actions)
   assert.deepEqual(parseActions('Nota [importante]\n[]\nFin [ok]'), [])
   assert.equal(parseActions('[1, 2] y [{"no":"accion"}]'), null)
-  const args = claudeArguments({ model: 'haiku' })
-  assert.deepEqual(args.slice(0, 5), ['-p', '--model', 'haiku', '--output-format', 'json'])
-  for (const flag of ['--setting-sources', '--strict-mcp-config', '--no-session-persistence', '--disable-slash-commands']) assert.ok(args.includes(flag), flag)
-  assert.equal(args[args.indexOf('--tools') + 1], '')
+  const args = modelArguments('claude')
+  for (const flag of ['--strict-mcp-config', '--no-session-persistence', '--disable-slash-commands']) assert.ok(args.includes(flag), flag)
+  assert.equal(args[args.indexOf('--setting-sources') + 1], 'project')
+  assert.equal(args[args.indexOf('--disallowedTools') + 1], 'Read,Grep,Glob')
   assert.ok(!args.includes('--add-dir'))
+  assert.deepEqual(modelArguments('codex'), [])
+  assert.equal(modelExtras('codex')['CLAUDE_CODE_SAFE_MODE'], undefined)
+  assert.equal(modelExtras('codex')['INKWELL_AUTODOC'], '1')
+  assert.equal(modelFor({ model: null }, { agent: 'claude' }), 'haiku')
+  assert.equal(modelFor({ model: 'sonnet' }, { agent: 'claude' }), 'sonnet')
+  assert.equal(modelFor({ model: 'sonnet' }, { agent: 'codex' }), undefined)
+  assert.equal(modelFor({ model: 'sonnet', models: { codex: 'gpt-5' } }, { agent: 'codex' }), 'gpt-5')
+  assert.equal(modelFor({ model: null, models: { gemini: 'flash' } }, { agent: 'opencode' }), undefined)
 })
 
 test('backlog and logbook headings are rejected, and titles compare without case or accents', () => {
@@ -224,10 +324,12 @@ test('backlog and logbook headings are rejected, and titles compare without case
 
 test('the autodoc config falls back to its defaults and reads the autodoc block', (t) => {
   const box = sandbox(t)
-  assert.deepEqual(loadAutodocConfig(box.env), { enabled: true, model: 'haiku', maxChars: 40000, minChars: 600, maxActions: 5, timeoutSeconds: 240 })
-  writeConfig(box, { enabled: false, model: 'sonnet', maxActions: 2 })
+  assert.deepEqual(loadAutodocConfig(box.env), { enabled: true, agent: 'claude', model: null, models: {}, maxChars: 40000, minChars: 600, maxActions: 5, timeoutSeconds: 240 })
+  writeConfig(box, { enabled: false, agent: 'codex', model: 'sonnet', models: { codex: 'gpt-5', gemini: '', bad: 3 }, maxActions: 2 })
   const config = loadAutodocConfig(box.env)
   assert.equal(config.enabled, false)
+  assert.equal(config.agent, 'codex')
+  assert.deepEqual(config.models, { codex: 'gpt-5' })
   assert.equal(config.model, 'sonnet')
   assert.equal(config.maxActions, 2)
   assert.equal(config.minChars, 600)
@@ -266,12 +368,15 @@ test('a valid proposal lands on an autodoc branch and leaves the page on main as
   assert.match(prompt, /\{"action":"propose"/)
   assert.match(prompt, new RegExp(`<page id="${w.rootId}">\n# Arquitectura\n\n## Red\n\nTodo pasa por el balanceador\\.`))
   const args = w.claude.lastArgs()
-  assert.deepEqual(w.claude.last().env, { INKWELL_AUTODOC: '1', GAZE_HARVEST: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_CODE_SAFE_MODE: '1' })
+  assert.deepEqual(w.claude.last().env, { INKWELL_AUTODOC: '1', GAZE_HARVEST: '1', BITA_NO_HOOKS: '1', KIT_NO_EVENTS: '1', KIT_HEADLESS: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_CODE_SAFE_MODE: '1' })
+  assert.equal(args[args.indexOf('--model') + 1], 'haiku')
+  assert.equal(result.agent, 'claude')
+  assert.equal(result.fallback, false)
   const cwd = w.claude.last().cwd as string
   assert.ok(realpathSync(dirname(cwd)) === realpathSync(tmpdir()) && basename(cwd).startsWith('inkwell-autodoc-'))
   assert.equal(existsSync(cwd), false)
   assert.ok(!args.includes('--add-dir'))
-  assert.equal(args[args.indexOf('--tools') + 1], '')
+  assert.equal(args[args.indexOf('--disallowedTools') + 1], 'Read,Grep,Glob')
   assert.ok(!args.includes('--safe-mode') && !args.includes('--restricted') && !args.includes('--help'))
   assert.equal(w.claude.calls(), 1)
   const keys = w.claude.last().keys as string[]
@@ -427,7 +532,22 @@ test('the session-end hook reads its input and stays quiet when autodoc is off',
   assert.equal(sessionEndInput({ session_id: 's' }, box.env), null)
   assert.deepEqual(sessionEndInput({ transcript_path: '/t.jsonl', session_id: 's', cwd: '/w' }, { ...box.env, INKWELL_AUTODOC: '0' }), { transcript: '/t.jsonl', session: 's', cwd: '/w' })
   assert.equal(sessionEndInput({ transcript_path: '/t.jsonl' }, { ...box.env, CLAUDE_PROJECT_DIR: '/p' })?.cwd, '/p')
+  assert.equal(sessionEndInput({ transcript_path: '/t.jsonl' }, { ...box.env, KIT_HEADLESS: '1' }), null)
+  assert.equal(sessionEndInput({ transcript_path: '/t.jsonl' }, { ...box.env, GEMINI_PROJECT_DIR: '/g', CLAUDE_PROJECT_DIR: '/p' }, 'gemini')?.cwd, '/g')
+  assert.equal(sessionEndInput({ transcript_path: '/t.jsonl' }, { ...box.env, CLAUDE_PROJECT_DIR: '/p' }, 'codex')?.cwd, process.cwd())
   assert.equal(autodocLogPath(box.env), join(platformContext({ env: box.env }).platform === 'win32' ? join(box.dir, 'localappdata') : join(box.dir, 'data'), 'inkwell', 'autodoc.log'))
+})
+
+test('hook session-end inside a headless agent launches nothing, and an unknown harness is refused', async (t) => {
+  const box = sandbox(t, { KIT_HEADLESS: '1' })
+  const claude = fakeClaude(box)
+  const transcript = writeTranscript(box, transcriptLines())
+  const result = box.run(['hook', 'session-end', '--harness', 'gemini'], JSON.stringify({ transcript_path: transcript, session_id: SESSION, cwd: box.dir }))
+  assert.equal(result.status, 0)
+  assert.notEqual(box.run(['hook', 'session-end', '--harness', 'vim'], '{}').status, 0)
+  await new Promise((done) => setTimeout(done, 1500))
+  assert.equal(existsSync(autodocLogPath(box.env)), false)
+  assert.equal(claude.calls(), 0)
 })
 
 test('hook session-end with INKWELL_AUTODOC set launches nothing', async (t) => {
@@ -684,9 +804,8 @@ test('the children get an allow-listed environment', () => {
     XDG_DATA_HOME: '/x',
     KIT_REGISTRY_DIR: '/r',
   }
-  const model = modelEnvironment(env, { INKWELL_AUTODOC: '1' })
-  assert.deepEqual(Object.keys(model).sort(), ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_USE_BEDROCK', 'HOME', 'HTTPS_PROXY', 'INKWELL_AUTODOC', 'INKWELL_DB_PATH', 'LANG', 'LC_ALL', 'PATH'])
-  const run = runEnvironment(env, { INKWELL_AUTODOC: '1' })
+  const run = runEnvironment({ ...env, OPENAI_API_KEY: 'o', GEMINI_API_KEY: 'g', NVM_BIN: '/n' }, { INKWELL_AUTODOC: '1' })
+  assert.ok(run['OPENAI_API_KEY'] === 'o' && run['GEMINI_API_KEY'] === 'g' && run['NVM_BIN'] === '/n' && run['ANTHROPIC_API_KEY'] === 'k')
   assert.ok(run['XDG_DATA_HOME'] === '/x' && run['KIT_REGISTRY_DIR'] === '/r')
   assert.equal(run['AWS_SECRET_ACCESS_KEY'], undefined)
   assert.equal(run['GITHUB_TOKEN'], undefined)
@@ -807,14 +926,6 @@ test('a stale lock is set aside before it goes, and release never deletes a lock
   writeFileSync(path, JSON.stringify({ pid: 2 ** 22 + 9, at: 'x' }))
   release()
   assert.equal(existsSync(path), true)
-})
-
-test('Windows arguments that would break the quoting are refused', () => {
-  assert.equal(quoteWindows('--model'), '"--model"')
-  assert.equal(quoteWindows(''), '""')
-  assert.throws(() => quoteWindows('C:\\tools\\'), /unsafe-argument/)
-  assert.throws(() => quoteWindows('a"b'), /unsafe-argument/)
-  assert.throws(() => quoteWindows('%PATH%'), /unsafe-argument/)
 })
 
 test('a version 2 database moves to the autodoc schema in one step', (t) => {

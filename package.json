@@ -24,7 +24,8 @@
     "claude-code",
     "gemini-cli",
     "codex",
-    "opencode"
+    "opencode",
+    "antigravity"
   ],
   "type": "module",
   "packageManager": "pnpm@11.22.0",
@@ -54,7 +55,7 @@
     "inkwell": "node src/bin/inkwell.ts"
   },
   "dependencies": {
-    "@kikedealba/kit": "^0.3.0",
+    "@kikedealba/kit": "^0.7.0",
     "marked": "^18.1.0"
   },
   "devDependencies": {

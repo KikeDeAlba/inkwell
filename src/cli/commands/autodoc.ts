@@ -4,7 +4,7 @@ import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync } f
 import { dirname, join } from 'node:path'
 import { platformContext } from '@kikedealba/kit/platform'
 import { AUTODOC_BRANCH_PREFIX } from '../../autodoc/actions.ts'
-import { stopActiveModel } from '../../autodoc/claude.ts'
+import { stopActiveModel } from '../../autodoc/model.ts'
 import { releaseHeldSessions } from '../../autodoc/lock.ts'
 import { loadAutodocConfig } from '../../autodoc/config.ts'
 import { runEnvironment } from '../../autodoc/env.ts'
@@ -47,7 +47,18 @@ export function transcriptSessionId(transcript: string): string {
   return createHash('sha256').update(transcript).digest('hex').slice(0, 32)
 }
 
-export function sessionEndInput(document: Record<string, unknown>, env: NodeJS.ProcessEnv = process.env): SessionEndInput | null {
+export const HOOK_HARNESSES = ['claude', 'codex', 'gemini'] as const
+
+export type HookHarness = (typeof HOOK_HARNESSES)[number]
+
+const PROJECT_DIR_VARS: Record<HookHarness, readonly string[]> = {
+  claude: ['CLAUDE_PROJECT_DIR'],
+  codex: [],
+  gemini: ['GEMINI_PROJECT_DIR', 'CLAUDE_PROJECT_DIR'],
+}
+
+export function sessionEndInput(document: Record<string, unknown>, env: NodeJS.ProcessEnv = process.env, harness: HookHarness = 'claude'): SessionEndInput | null {
+  if (env['KIT_HEADLESS'] !== undefined && env['KIT_HEADLESS'] !== '' && env['KIT_HEADLESS'] !== '0') return null
   if (env['INKWELL_AUTODOC'] !== undefined && env['INKWELL_AUTODOC'] !== '0') return null
   if (env['INKWELL_NO_AUTODOC'] === '1') return null
   if (!loadAutodocConfig(env).enabled) return null
@@ -56,7 +67,7 @@ export function sessionEndInput(document: Record<string, unknown>, env: NodeJS.P
   return {
     transcript,
     session: text(document['session_id']) ?? transcriptSessionId(transcript),
-    cwd: text(document['cwd']) ?? text(env['CLAUDE_PROJECT_DIR']) ?? process.cwd(),
+    cwd: text(document['cwd']) ?? PROJECT_DIR_VARS[harness].map((name) => text(env[name])).find((value) => value !== null) ?? process.cwd(),
   }
 }
 
@@ -101,11 +112,21 @@ function spawnDetached(args: readonly string[], logPath: string, env: NodeJS.Pro
   }
 }
 
+const HOOK_USAGE = `Usage: inkwell hook session-end [--harness ${HOOK_HARNESSES.join('|')}]`
+
+function hookHarness(argv: string[]): HookHarness {
+  const value = readString(parseCommandArgs(argv, { harness: { type: 'string' } }, BASE_OPTIONS), 'harness')
+  if (value === undefined) return 'claude'
+  if (!(HOOK_HARNESSES as readonly string[]).includes(value)) throw new UsageError(HOOK_USAGE)
+  return value as HookHarness
+}
+
 export function runHook(argv: string[]): number {
-  const [event] = argv
-  if (event !== 'session-end') throw new UsageError('Usage: inkwell hook session-end')
+  const [event, ...rest] = argv
+  if (event !== 'session-end') throw new UsageError(HOOK_USAGE)
+  const harness = hookHarness(rest)
   try {
-    const input = sessionEndInput(readStdin())
+    const input = sessionEndInput(readStdin(), process.env, harness)
     if (input === null) return 0
     spawnDetached(runArguments(input), autodocLogPath(), runEnvironment(process.env, { INKWELL_AUTODOC: '1' }))
   } catch {

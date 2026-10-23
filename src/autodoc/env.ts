@@ -15,6 +15,7 @@ const BASE_NAMES = [
   'NO_PROXY',
   'NODE_EXTRA_CA_CERTS',
   'CLAUDE_CONFIG_DIR',
+  'SHELL',
   'GAZE_HARVEST',
   'BITA_NO_HOOKS',
   'KIT_NO_EVENTS',
@@ -31,7 +32,7 @@ const BASE_NAMES = [
   'PROGRAMFILES',
 ]
 
-const BASE_PREFIXES = ['LC_', 'ANTHROPIC_', 'CLAUDE_CODE_', 'INKWELL_']
+const BASE_PREFIXES = ['LC_', 'NVM_', 'ANTHROPIC_', 'CLAUDE_CODE_', 'OPENAI_', 'CODEX_', 'GEMINI_', 'GOOGLE_', 'ANTIGRAVITY_', 'OPENCODE_', 'INKWELL_']
 
 const RUN_NAMES = ['KIT_REGISTRY_DIR', 'KIT_CREDENTIALS', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM']
 
@@ -46,10 +47,6 @@ function pick(env: NodeJS.ProcessEnv, names: readonly string[], prefixes: readon
     if (wanted.has(upper) || prefixes.some((prefix) => upper.startsWith(prefix))) out[key] = value
   }
   return out
-}
-
-export function modelEnvironment(env: NodeJS.ProcessEnv, extra: Readonly<Record<string, string>>): NodeJS.ProcessEnv {
-  return { ...pick(env, BASE_NAMES, BASE_PREFIXES), ...extra }
 }
 
 export function runEnvironment(env: NodeJS.ProcessEnv, extra: Readonly<Record<string, string>>): NodeJS.ProcessEnv {
