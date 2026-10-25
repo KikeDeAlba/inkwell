@@ -17,6 +17,7 @@ export const CAPABILITIES = [
   'docs.confluence.sync',
   'docs.entry-notes',
   'docs.autodoc',
+  'meetings.kind.meeting',
 ]
 
 export const EMITTED_EVENTS = [DOCS_CHANGED_EVENT]
