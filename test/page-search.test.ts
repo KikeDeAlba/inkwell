@@ -87,3 +87,32 @@ test('page search ranks the pages that match and names where each match is', asy
   db.close()
   rmSync(root, { recursive: true, force: true })
 })
+
+test('the meetings of a page count the plain meeting kind and the old remote and in-person ones', () => {
+  const db = openMemoryDatabase()
+  const space = insertSpace(db, { name: 'Apartados', createdAt: NOW })
+  const page = insertPage(db, { spaceId: space.id, parentId: null, slug: 'waf', title: 'WAF', relPath: 'waf.md', depth: 0, source: 'cli', now: NOW })
+  const link = (entryId: number, entryKind: string | null, startedAt: string) =>
+    linkEntryToPage(db, page, entryId, '', NOW, {
+      title: `entry ${entryId}`,
+      entryKind,
+      startedAt,
+      stoppedAt: new Date(Date.parse(startedAt) + 1_800_000).toISOString(),
+      durationSeconds: 1800,
+    })
+  link(1, 'meeting', '2026-10-03T15:00:00.000Z')
+  link(2, 'remote-meeting', '2026-10-01T15:00:00.000Z')
+  link(3, 'in-person-meeting', '2026-10-02T15:00:00.000Z')
+  link(4, 'task', '2026-10-04T15:00:00.000Z')
+  link(5, null, '2026-10-05T15:00:00.000Z')
+
+  assert.deepEqual(
+    meetingsOfPage(db, page).map((meeting) => [meeting.entryId, meeting.kind]),
+    [
+      [2, 'remote-meeting'],
+      [3, 'in-person-meeting'],
+      [1, 'meeting'],
+    ],
+  )
+  db.close()
+})

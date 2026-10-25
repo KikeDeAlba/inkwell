@@ -31,7 +31,7 @@ test('capabilities lists every documentation capability of the contract', (t) =>
   const data = box.ok('capabilities')
   assert.equal(data.name, 'inkwell')
   assert.deepEqual(data.capabilities, CAPABILITIES)
-  for (const capability of ['docs.page.read', 'docs.page.write', 'docs.backlog', 'docs.history', 'docs.propose', 'docs.diagrams', 'docs.export.pdf', 'docs.confluence.sync', 'docs.entry-notes']) {
+  for (const capability of ['docs.page.read', 'docs.page.write', 'docs.backlog', 'docs.history', 'docs.propose', 'docs.diagrams', 'docs.export.pdf', 'docs.confluence.sync', 'docs.entry-notes', 'meetings.kind.meeting']) {
     assert.ok(data.capabilities.includes(capability), capability)
   }
 })

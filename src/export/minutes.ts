@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Marked, type Token, type Tokens } from 'marked'
 import { formatDuration } from '../domain/duration.ts'
 
-export type MeetingMode = 'remote' | 'in-person'
+export type MeetingMode = 'meeting' | 'remote' | 'in-person'
 
 export interface MinutesDocument {
   title: string
@@ -37,7 +37,7 @@ const FONTS = [
 
 const GENERIC_TITLES = [/^(remote|in[- ]person)\s+meeting$/i, /^reuni[oó]n(\s+(remota|presencial))?$/i, /^meeting$/i]
 
-const MODALITY: Record<MeetingMode, string> = { remote: 'Remota', 'in-person': 'Presencial' }
+const MODALITY: Record<MeetingMode, string | null> = { meeting: null, remote: 'Remota', 'in-person': 'Presencial' }
 
 export function isGenericTitle(title: string): boolean {
   const trimmed = title.trim()
