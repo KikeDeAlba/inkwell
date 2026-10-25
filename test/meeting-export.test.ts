@@ -78,6 +78,15 @@ test('the HTML has the cover, the minutes heading and the body without the recap
   assert.match(html, /<style>\n#print-root\{\}\n<\/style>/)
 })
 
+test('remote and in-person minutes show their modality on the cover and in the details', async () => {
+  const remote = await buildMinutesHtml(minutes({ mode: 'remote' }), { styles: '', renderMermaid: svgRenderer })
+  assert.match(remote, /11:13 · 27m · Remota<\/div>/)
+  assert.match(remote, /<span class="print-index-number">Modalidad<\/span><span>Remota<\/span>/)
+
+  const unknown = await buildMinutesHtml(minutes({ mode: null }), { styles: '', renderMermaid: svgRenderer })
+  assert.doesNotMatch(unknown, /Modalidad/)
+})
+
 test('a plain meeting shows no modality on the cover nor in the details', async () => {
   const html = await buildMinutesHtml(minutes({ mode: 'meeting' }), { styles: '', renderMermaid: svgRenderer })
 
@@ -225,6 +234,39 @@ test('exporting asks recap for the entry and prints the HTML with headless Chrom
     assert.match(chrome?.html ?? '', /<h1 class="print-cover-title">Reunión presencial: descargas SAP → central<\/h1>/)
     assert.match(chrome?.html ?? '', /Remota/)
     assert.equal(existsSync(out), true)
+  } finally {
+    f.cleanup()
+  }
+})
+
+test('exporting a meeting prints the modality of each recap mode, and none for the plain meeting', async () => {
+  const expectations: Array<[string, RegExp | null]> = [
+    ['meeting', null],
+    ['remote', /Remota/],
+    ['in-person', /Presencial/],
+  ]
+  for (const [mode, modality] of expectations) {
+    const f = fixture({ mode })
+    try {
+      await exportMeeting({ entryId: 9, out: join(f.root, `${mode}.pdf`), timezone: TZ, entry: null, workDir: f.workDir }, f.env)
+      const html = f.runs[1]?.html ?? ''
+      if (modality === null) {
+        assert.doesNotMatch(html, /Modalidad|Remota|Presencial/, mode)
+        assert.match(html, /27m<\/div>/, mode)
+      } else {
+        assert.match(html, modality, mode)
+      }
+    } finally {
+      f.cleanup()
+    }
+  }
+})
+
+test('a recap meeting without a mode exports without modality', async () => {
+  const f = fixture({ mode: null })
+  try {
+    await exportMeeting({ entryId: 9, out: join(f.root, 'x.pdf'), timezone: TZ, entry: null, workDir: f.workDir }, f.env)
+    assert.doesNotMatch(f.runs[1]?.html ?? '', /Modalidad/)
   } finally {
     f.cleanup()
   }
