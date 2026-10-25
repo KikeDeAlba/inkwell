@@ -129,7 +129,7 @@ export function parseRecapShow(stdout: string, entryId: number): RecapMeeting {
     throw new ConflictError(`recap answered without the meeting of entry ${entryId}.`, 'RECAP_FAILED')
   }
   const wrapup = record(data['wrapup'])
-  const mode = data['mode'] === 'remote' || data['mode'] === 'in-person' ? data['mode'] : null
+  const mode = data['mode'] === 'meeting' || data['mode'] === 'remote' || data['mode'] === 'in-person' ? data['mode'] : null
   const duration = data['durationSeconds']
   return {
     dir,

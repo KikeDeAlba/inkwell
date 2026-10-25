@@ -31,7 +31,7 @@ test('capabilities lists every documentation capability of the contract', (t) =>
   const data = box.ok('capabilities')
   assert.equal(data.name, 'inkwell')
   assert.deepEqual(data.capabilities, CAPABILITIES)
-  for (const capability of ['docs.page.read', 'docs.page.write', 'docs.backlog', 'docs.history', 'docs.propose', 'docs.diagrams', 'docs.export.pdf', 'docs.confluence.sync', 'docs.entry-notes']) {
+  for (const capability of ['docs.page.read', 'docs.page.write', 'docs.backlog', 'docs.history', 'docs.propose', 'docs.diagrams', 'docs.export.pdf', 'docs.confluence.sync', 'docs.entry-notes', 'meetings.kind.meeting']) {
     assert.ok(data.capabilities.includes(capability), capability)
   }
 })
@@ -205,4 +205,42 @@ test('renaming or moving a parent carries the whole subtree, and moving without 
   assert.equal(reordered.page.parentId, Number(parent))
   assert.equal(reordered.page.relPath, 'codi/reglas-de-negocio/limites.md')
   assert.deepEqual(box.ok('git', 'status').dirty, [])
+})
+
+test('page ls and show --json list the meetings of every kind and skip other entries', (t) => {
+  const box = sandbox(t)
+  const entry = (id: number, kind: string | null, hour: number) => ({
+    ...ENTRY,
+    id,
+    kind,
+    startedAt: `2026-10-0${id}T${String(hour).padStart(2, '0')}:00:00.000Z`,
+    stoppedAt: `2026-10-0${id}T${String(hour).padStart(2, '0')}:30:00.000Z`,
+  })
+  registerFakeBita(box, [entry(1, 'meeting', 15), entry(2, 'remote-meeting', 15), entry(3, 'in-person-meeting', 15), entry(4, 'task', 15), entry(5, null, 15)])
+  box.ok('space', 'add', 'Apartados', '--key', 'APT', '--external-ref', 'bita:project:3')
+  const pageId = String(box.ok('page', 'new', 'Reuniones', '--space', 'APT').page.pageId)
+  for (const id of ['1', '2', '3', '4', '5']) box.ok('page', 'link', pageId, '--entry', id)
+
+  const shown = box.ok('page', 'show', pageId)
+  assert.deepEqual(
+    shown.meetings.map((meeting: { entryId: number; kind: string; durationSeconds: number }) => [meeting.entryId, meeting.kind, meeting.durationSeconds]),
+    [
+      [1, 'meeting', 1800],
+      [2, 'remote-meeting', 1800],
+      [3, 'in-person-meeting', 1800],
+    ],
+  )
+  assert.equal(shown.entryCount, 5)
+
+  const listed = box.ok('page', 'ls').pages.find((page: { pageId: number }) => page.pageId === Number(pageId))
+  assert.deepEqual(listed.meetings.map((meeting: { kind: string }) => meeting.kind), ['meeting', 'remote-meeting', 'in-person-meeting'])
+})
+
+test('a page without meetings returns an empty meetings list', (t) => {
+  const box = sandbox(t)
+  registerFakeBita(box, [{ ...ENTRY, kind: 'task' }])
+  box.ok('space', 'add', 'Apartados', '--key', 'APT', '--external-ref', 'bita:project:3')
+  const pageId = String(box.ok('page', 'new', 'Sin reuniones', '--space', 'APT').page.pageId)
+  box.ok('page', 'link', pageId, '--entry', '77')
+  assert.deepEqual(box.ok('page', 'show', pageId).meetings, [])
 })
